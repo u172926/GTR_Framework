@@ -271,6 +271,9 @@ void main()
 	if(albedo.a < u_alpha_cutoff)
 		discard;
 
+	vec3 light = vec3(0.0);
+	light += u_ambient_light;
+
 	vec3 metallicness = texture(u_metallic_texture, v_uv).rgb * u_metallic_factor;
 	vec3 roughness = texture(u_metallic_texture, v_uv).rgb * u_roughness_factor;
 
@@ -279,12 +282,14 @@ void main()
 
 	vec3 N = normalize(v_normal);
 	vec3 WP = v_world_position;
-
 	mat3 TBN = cotangent_frame(N, WP, v_uv);
 	vec3 normal = normalize(TBN * normal_map);
-	
-	vec3 light = vec3(0.0);
-	light += u_ambient_light;
+
+	vec3 R = reflect(normal, v_position); //or just N
+	float RdotV = max(dot(R, v_position), 0.0);
+	float specular = pow(RdotV, 3.0);
+
+	light += specular * metallicness * roughness;
 
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0) shadow_factor = testShadow(v_world_position);
@@ -293,6 +298,7 @@ void main()
 	{
 		float NdotL = dot(normal, u_light_front);
 		light += max(NdotL, 0.0)  * u_light_color;
+		
 	}
 	else if (int(u_light_info.x) == POINT_LIGHT || int(u_light_info.x) == SPOT_LIGHT)
 	{
