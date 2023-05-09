@@ -33,7 +33,7 @@ Renderer::Renderer(const char* shader_atlas_filename)
 	render_mode = eRenderMode::LIGHTS; //default
 	scene = nullptr;
 	skybox_cubemap = nullptr;
-	show_shadowmaps = true;
+	show_shadowmaps = false;
 	show_gbuffers = false;
 
 	if (!GFX::Shader::LoadAtlas(shader_atlas_filename))	exit(1);
@@ -83,7 +83,7 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 	this->scene = scene;
 	setupScene();
 
-	//base_ents = scene->entities;
+	base_ents = scene->entities;
 
 	//std::sort(base_ents.begin(), base_ents.end(),
 	//	[](const BaseEntity* a, const BaseEntity* b)
@@ -97,8 +97,8 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 	//		return false;
 	//	});
 
-	//std::rotate(base_ents.begin(), base_ents.begin() + 2, base_ents.end());
-	//std::rotate(base_ents.begin(), base_ents.begin() + 3, base_ents.end());
+	std::rotate(base_ents.begin(), base_ents.begin() + 2, base_ents.end());
+	std::rotate(base_ents.begin(), base_ents.begin() + 3, base_ents.end());
 
 	
 	renderFrame(scene, camera);
@@ -230,9 +230,9 @@ void Renderer::renderForward(SCN::Scene* scene, Camera* camera)
 void Renderer::renderSceneNodes(SCN::Scene* scene, Camera* camera)
 {
 	//render entities
-	for (int i = 0; i < scene->entities.size(); ++i)
+	for (int i = 0; i < base_ents.size(); ++i)
 	{
-		BaseEntity* ent = scene->entities[i];
+		BaseEntity* ent = base_ents[i];
 		if (!ent->visible)	continue;
 
 		if (ent->getType() == eEntityType::PREFAB)
@@ -269,6 +269,8 @@ void Renderer::renderSkybox(GFX::Texture* cubemap)
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glEnable(GL_DEPTH_TEST);
 }
+
+
 
 //renders a node of the prefab and its children
 void Renderer::renderNode(SCN::Node* node, Camera* camera)
@@ -416,7 +418,7 @@ void Renderer::renderMeshWithMaterialFlat(Matrix44 model, GFX::Mesh* mesh, SCN::
 	shader->disable();
 }
 
-//renders a mesh given its transform and material, lights adn shadows
+//renders a mesh given its transform and material, lights, shadows, normal, metal
 void Renderer::renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material)
 {
 	//in case there is nothing to do
@@ -431,8 +433,8 @@ void Renderer::renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh
 	GFX::Texture* albedo_texture = material->textures[SCN::eTextureChannel::ALBEDO].texture;
 	GFX::Texture* emissive_texture = material->textures[SCN::eTextureChannel::EMISSIVE].texture;
 	GFX::Texture* normal_texture = material->textures[SCN::eTextureChannel::NORMALMAP].texture;
-	//GFX::Texture* metallic_texture = material->textures[SCN::eTextureChannel::METALLIC_ROUGHNESS].texture;
-	//GFX::Texture* occlusion_texture = material->textures[SCN::eTextureChannel::OCCLUSION].texture; //metallic.r
+	//GFX::Texture* metallic_texture = material->textures[SCN::eTextureChannel::METALLIC_ROUGHNESS].texture; 
+	// occlusion (.r) roughness (.g) metalness (.b)
 
 	if (albedo_texture == NULL) albedo_texture = white; //a 1x1 white texture
 
@@ -588,6 +590,7 @@ void Renderer::renderMeshWithMaterialGBuffers(Matrix44 model, GFX::Mesh* mesh, S
 	glDisable(GL_BLEND);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 }
+
 
 
 void SCN::Renderer::cameraToShader(Camera* camera, GFX::Shader* shader)

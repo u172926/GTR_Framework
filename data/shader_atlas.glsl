@@ -274,8 +274,8 @@ void main()
 	vec3 light = vec3(0.0);
 	light += u_ambient_light;
 
-	vec3 metallicness = texture(u_metallic_texture, v_uv).rgb * u_metallic_factor;
-	vec3 roughness = texture(u_metallic_texture, v_uv).rgb * u_roughness_factor;
+	vec3 metallicness = texture(u_metallic_texture, v_uv).b * u_metallic_factor;
+	vec3 roughness = texture(u_metallic_texture, v_uv).g * u_roughness_factor;
 
 	vec3 normal_map = texture(u_normal_texture, v_uv).rgb;
 	normal_map = normalize(normal_map * 2.0 - 1.0);
@@ -285,9 +285,9 @@ void main()
 	mat3 TBN = cotangent_frame(N, WP, v_uv);
 	vec3 normal = normalize(TBN * normal_map);
 
-	vec3 R = reflect(normal, v_position); //or just N
+	vec3 R = reflect(N, v_position); 
 	float RdotV = max(dot(R, v_position), 0.0);
-	float specular = pow(RdotV, 3.0);
+	float specular = pow(RdotV, 4.0);
 
 	light += specular * metallicness * roughness;
 
@@ -319,8 +319,10 @@ void main()
 		light += max(NdotL, 0.0)  * u_light_color * attenuation;
 	}
 
-	vec3 color = albedo.rgb * light * shadow_factor; //*specular
-	color += u_emissive_factor * texture( u_emissive_texture, v_uv ).xyz; 
+	vec3 occlusion = vec3(texture(u_metallic_texture, v_uv).r, 0.0, 0.0);
+
+	vec3 color = albedo.rgb * light * shadow_factor; 
+	color += u_emissive_factor * texture( u_emissive_texture, v_uv ).xyz; // + occlusion; 
 	
 	FragColor = vec4(color, albedo.a);
 }
