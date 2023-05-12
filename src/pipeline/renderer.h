@@ -38,6 +38,11 @@ namespace SCN {
 
 		eRenderMode render_mode;
 
+		float tonemapper_scale;
+		float average_lum;
+		float lum_white2;
+		float gamma;
+
 		GFX::Texture* skybox_cubemap;
 
 		SCN::Scene* scene;

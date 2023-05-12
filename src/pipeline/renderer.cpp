@@ -36,6 +36,11 @@ Renderer::Renderer(const char* shader_atlas_filename)
 	show_shadowmaps = false;
 	show_gbuffers = false;
 
+	tonemapper_scale = 1.0;
+	average_lum = 1.0;
+	lum_white2 = 1.0;
+	gamma = 1.0;
+
 	if (!GFX::Shader::LoadAtlas(shader_atlas_filename))	exit(1);
 
 	GFX::checkGLErrors();
@@ -124,6 +129,9 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 	{
 		gbuffer_fbo = new GFX::FBO();
 		gbuffer_fbo->create(size.x, size.y, 3, GL_RGBA, GL_UNSIGNED_BYTE, true);
+
+		illumination_fbo = new GFX::FBO();
+		illumination_fbo->create(size.x, size.y, 1, GL_RGB, GL_HALF_FLOAT, true); //half_float for SDR
 	}
 
 	//render inside the fbo all that is in the bind 
@@ -138,61 +146,66 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 	gbuffer_fbo->unbind();
 
-	camera->enable();
-	//to clear the scene
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_BLEND);
-	glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	illumination_fbo->bind();
 
-	if (skybox_cubemap) renderSkybox(skybox_cubemap);
+		camera->enable();
+		//to clear the scene
+		glDisable(GL_DEPTH_TEST);
+		glDisable(GL_BLEND);
+		glClearColor(scene->background_color.x, scene->background_color.y, scene->background_color.z, 1.0);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	GFX::Mesh* mesh = GFX::Mesh::getQuad();
-	GFX::Shader* shader = GFX::Shader::Get("deferred_global");
+		if (skybox_cubemap) renderSkybox(skybox_cubemap);
 
-	shader->enable();
-	shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
-	shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
-	shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
-	shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
-	shader->setUniform("u_ambient_light", scene->ambient_light);
-	
-	mesh->render(GL_TRIANGLES);
+		GFX::Mesh* mesh = GFX::Mesh::getQuad();
+		GFX::Shader* shader = GFX::Shader::Get("deferred_global");
 
-	//shader = GFX::Shader::Get("deferred_light");
-	//
-	//shader->enable();
-	//shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
-	//shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
-	//shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
-	//shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
-
-	glDisable(GL_DEPTH_TEST);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE);
-
-	for (auto light : lights)
-	{
-		shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
-		shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
-		lightToShader(light, shader);
+		shader->enable();
+		shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
+		shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
+		shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
+		shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
+		shader->setUniform("u_ambient_light", scene->ambient_light);
+		
 		mesh->render(GL_TRIANGLES);
-	}
 
-	glDisable(GL_BLEND);
+		shader = GFX::Shader::Get("deferred_light");
+		
+		shader->enable();
+		shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
+		shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
+		shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
+		shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
 
+		glDisable(GL_DEPTH_TEST);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE);
+
+		for (auto light : lights)
+		{
+			shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
+			shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
+			lightToShader(light, shader);
+			mesh->render(GL_TRIANGLES);
+		}
+		glDisable(GL_BLEND);
+
+
+		//call for alpha objects
+
+	illumination_fbo->unbind();
 
 	if (show_gbuffers)
 	{
 		//albedo
 		glViewport(0, size.y / 2, size.x / 2, size.y / 2);
-		gbuffer_fbo->color_textures[0]->toViewport(); 
+		gbuffer_fbo->color_textures[0]->toViewport();
 		//normal
 		glViewport(size.x / 2, size.y / 2, size.x / 2, size.y / 2);
 		gbuffer_fbo->color_textures[1]->toViewport();
 		glViewport(0, 0, size.x / 2, size.y / 2);
 		//emissive
-		gbuffer_fbo->color_textures[2]->toViewport(); 
+		gbuffer_fbo->color_textures[2]->toViewport();
 		glViewport(size.x / 2, 0, size.x / 2, size.y / 2);
 		//depth
 		GFX::Shader* shader = GFX::Shader::getDefaultShader("linear_depth");
@@ -201,8 +214,17 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		gbuffer_fbo->depth_texture->toViewport(shader);
 		glViewport(0, 0, size.x, size.y);
 	}
-
-	//compute illuminaiton
+	else
+	{
+		//apply tone mapper
+		shader = GFX::Shader::Get("tonemapper");
+		shader->enable();
+		shader->setUniform("u_scale", tonemapper_scale);
+		shader->setUniform("u_average_lum", average_lum);
+		shader->setUniform("u_lumwhite2", lum_white2);
+		shader->setUniform("u_igamma", 1.0f / gamma);
+		illumination_fbo->color_textures[0]->toViewport(shader);
+	}		
 
 }
 
@@ -541,7 +563,8 @@ void Renderer::renderMeshWithMaterialGBuffers(Matrix44 model, GFX::Mesh* mesh, S
 
 	GFX::Texture* albedo_texture = material->textures[SCN::eTextureChannel::ALBEDO].texture;
 	GFX::Texture* emissive_texture = material->textures[SCN::eTextureChannel::EMISSIVE].texture;
-	//implement normal, metal, etc
+	GFX::Texture* normal_texture = material->textures[SCN::eTextureChannel::NORMALMAP].texture;
+	//implement metal
 
 	if (albedo_texture == NULL) albedo_texture = white; //a 1x1 white texture
 
@@ -574,6 +597,8 @@ void Renderer::renderMeshWithMaterialGBuffers(Matrix44 model, GFX::Mesh* mesh, S
 	shader->setUniform("u_emissive_factor", material->emissive_factor);
 	shader->setUniform("u_albedo_texture", albedo_texture ? albedo_texture : white, 0);
 	shader->setUniform("u_emissive_texture", emissive_texture ? emissive_texture : white, 1);
+	shader->setUniform("u_normal_texture", normal_texture ? normal_texture : white, 2);
+
 
 	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
 	shader->setUniform("u_alpha_cutoff", material->alpha_mode == SCN::eAlphaMode::MASK ? material->alpha_cutoff : 0.001f);
@@ -605,7 +630,7 @@ void SCN::Renderer::lightToShader(LightEntity* light, GFX::Shader* shader)
 	shader->setUniform("u_light_front", light->root.model.rotateVector(vec3(0, 0, 1))); //for spot and directional
 	shader->setUniform("u_light_color", light->color * light->intensity);
 	shader->setUniform("u_light_info", vec4((int)light->light_type, light->near_distance, light->max_distance, 0)); //0 as a place holder for another porperty
-	shader->setUniform("u_light_cone", vec2(cos(light->cone_info.x * DEG2RAD), cos(light->cone_info.y * DEG2RAD))); //cone for the spot light
+	if(light->light_type == eLightType::SPOT) shader->setUniform("u_light_cone", vec2(cos(light->cone_info.x * DEG2RAD), cos(light->cone_info.y * DEG2RAD))); //cone for the spot light
 
 	shader->setUniform("u_shadow_param", vec2(light->shadowmap ? 1 : 0, light->shadow_bias));
 	if (light->shadowmap)
@@ -625,6 +650,11 @@ void Renderer::showUI()
 	ImGui::Checkbox("Show Gbuffers", &show_gbuffers);
 
 	ImGui::Combo("Render Mode", (int*)&render_mode, "TEXTURED\0LIGHTS\0DEFERRED" , 3);
+
+	ImGui::SliderFloat("tonemapper_scale", &tonemapper_scale, 0, 2);
+	ImGui::SliderFloat("average_lum", &average_lum, 0, 2);
+	ImGui::SliderFloat("lum_white2", &lum_white2, 0, 2);
+	ImGui::SliderFloat("gamma", &gamma, 0, 2);
 
 	//add here your stuff
 	//...
@@ -650,7 +680,7 @@ void Renderer::generateShadowMaps()
 		if (!light->shadowmap_fbo) //build shadowmap fbo if we dont have one
 		{
 			int size{};
-			if (light->light_type == eLightType::SPOT) size = 1024;
+			if (light->light_type == eLightType::SPOT) size = 4096;
 			if (light->light_type == eLightType::DIRECTIONAL) size = 15000;
 
 			light->shadowmap_fbo = new GFX::FBO();
