@@ -1,6 +1,6 @@
-Andrea Tortato - andrea.tortato01@estudiant.upf.edu - NIA:231603
+Andrea Tortato - andrea.tortato01@estudiant.upf.edu - NIA: 231603
 
-Edgar Espinos - edgar.espinos01@estudiant.upf.edu - NIA:
+Edgar Espinos - edgar.espinos01@estudiant.upf.edu - NIA: 230024
 
 [README of Assigment 1, update before delivery]
 
