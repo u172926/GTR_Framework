@@ -105,7 +105,6 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 	std::rotate(base_ents.begin(), base_ents.begin() + 2, base_ents.end());
 	std::rotate(base_ents.begin(), base_ents.begin() + 3, base_ents.end());
 
-	
 	renderFrame(scene, camera);
 
 	if (show_shadowmaps) debugShadowMaps();
@@ -252,9 +251,9 @@ void Renderer::renderForward(SCN::Scene* scene, Camera* camera)
 void Renderer::renderSceneNodes(SCN::Scene* scene, Camera* camera)
 {
 	//render entities
-	for (int i = 0; i < base_ents.size(); ++i)
+	for (int i = 0; i < scene->entities.size(); ++i)
 	{
-		BaseEntity* ent = base_ents[i];
+		BaseEntity* ent = scene->entities[i];
 		if (!ent->visible)	continue;
 
 		if (ent->getType() == eEntityType::PREFAB)
@@ -455,7 +454,7 @@ void Renderer::renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh
 	GFX::Texture* albedo_texture = material->textures[SCN::eTextureChannel::ALBEDO].texture;
 	GFX::Texture* emissive_texture = material->textures[SCN::eTextureChannel::EMISSIVE].texture;
 	GFX::Texture* normal_texture = material->textures[SCN::eTextureChannel::NORMALMAP].texture;
-	//GFX::Texture* metallic_texture = material->textures[SCN::eTextureChannel::METALLIC_ROUGHNESS].texture; 
+	GFX::Texture* metallic_texture = material->textures[SCN::eTextureChannel::METALLIC_ROUGHNESS].texture; 
 	// occlusion (.r) roughness (.g) metalness (.b)
 
 	if (albedo_texture == NULL) albedo_texture = white; //a 1x1 white texture
@@ -492,12 +491,12 @@ void Renderer::renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh
 
 	shader->setUniform("u_albedo_factor", material->color);
 	shader->setUniform("u_emissive_factor", material->emissive_factor);
-	//shader->setUniform("u_metallic_factor", material->metallic_factor);
-	//shader->setUniform("u_roughness_factor", material->roughness_factor);
+	shader->setUniform("u_metallic_factor", material->metallic_factor);
+	shader->setUniform("u_roughness_factor", material->roughness_factor);
 	shader->setUniform("u_albedo_texture", albedo_texture ? albedo_texture : white, 0);
 	shader->setUniform("u_emissive_texture", emissive_texture ? emissive_texture : white, 1);
 	shader->setUniform("u_normal_texture", normal_texture ? normal_texture : white, 2);
-	//shader->setUniform("u_metallic_texture", metallic_texture ? metallic_texture : white, 3);
+	shader->setUniform("u_metallic_texture", metallic_texture ? metallic_texture : white, 3);
 
 	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
 	shader->setUniform("u_alpha_cutoff", material->alpha_mode == SCN::eAlphaMode::MASK ? material->alpha_cutoff : 0.001f);

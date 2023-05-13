@@ -247,22 +247,25 @@ in vec3 v_normal;
 in vec2 v_uv;
 in vec4 v_color;
 
+
 uniform vec4 u_albedo_factor;
 uniform vec3 u_emissive_factor;
-uniform vec3 u_metallic_factor;
-uniform vec3 u_roughness_factor;
+uniform float u_metallic_factor;
+uniform float u_roughness_factor;
 
 uniform sampler2D u_albedo_texture;
 uniform sampler2D u_emissive_texture;
 uniform sampler2D u_normal_texture;
 uniform sampler2D u_metallic_texture;
 
+uniform vec3 u_camera_position;
 uniform vec3 u_ambient_light;
 
 uniform float u_time;
 uniform float u_alpha_cutoff;
 
 #include "all_lights"
+#include "pbr_equations"
 
 out vec4 FragColor;
 
@@ -280,32 +283,49 @@ void main()
 	vec3 normal_map = texture(u_normal_texture, v_uv).rgb;
 	normal_map = normalize(normal_map * 2.0 - vec3(1.0));
 
-	vec4 metallic = texture(u_metallic_texture, v_uv);
-	float red_channel = metallic.r;
-	float green_channel = metallic.g;
-	float blue_channel = metallic.b;
-
-	vec3 occlusion = vec3(red_channel) / vec3(red_channel); //=1 for now
-	vec3 roughness = vec3(green_channel) * u_roughness_factor;
-	vec3 metallicness = vec3(blue_channel) * u_metallic_factor;
+	vec3 metallic = texture(u_metallic_texture, v_uv).xyz;
+	float occlusion = metallic.r;
+	float roughness = metallic.g * u_roughness_factor;
+	float metallicness = metallic.b * u_metallic_factor;
 
 	vec3 N = normalize(v_normal);
 	vec3 WP = v_world_position;
 	mat3 TBN = cotangent_frame(N, WP, v_uv);
 	vec3 normal = normalize(TBN * normal_map);
 
-	vec3 R = reflect(N, v_position); 
-	float RdotV = max(dot(R, v_position), 0.0);
-	float specular = pow(RdotV, 4.0);
+	vec3 V = normalize(u_camera_position - v_position);
 
-	light += specular * metallicness * roughness;
+	vec3 R = reflect(N, V); 
+	float RdotV = max(dot(R, V), 0.0);
+	float specular = pow(RdotV, 2.0);
+
 
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0) shadow_factor = testShadow(v_world_position);
 
 	light += compute_shadows(u_light_info, normal, u_light_color, u_light_position, u_light_front, u_light_cone, v_world_position);
+		light += u_light_color * specular ;
 
-	vec3 color = albedo.rgb * light * shadow_factor * occlusion + emissive;
+	//vec3 f0 = mix(vec3(0.5), albedo.xyz, metallicness);
+	//vec3 diffuseColor = (1.0 - metallicness) * albedo.xyz;
+	//
+	//vec3 L = normalize(lightDirection);
+	//vec3 H = normalize(V + L);
+	//float NoH = dot(N);
+	//float NoV;
+	//float NoL;
+	//float LoH;
+	//
+	//vec3 Fr_d = specularBRDF(roughness, f0, NoH, NoV, NoL, LoH);
+	//
+	//linearRoughness = roughness * roughness;
+	//vec3 Fd_d = diffuseColor * Fd_Burley(NoV, NoL, LoH, linearRoughness); 
+	//
+	//vec3 direct = Fr_d + Fd_d;
+	//
+	//light += direct;
+
+	vec3 color = albedo.rgb * light * shadow_factor + emissive;
 	
 	FragColor = vec4(color, albedo.a);
 }
@@ -319,6 +339,9 @@ void main()
 #version 330 core
 
 in vec3 v_normal;
+in vec3 v_position;
+
+uniform vec3 u_camera_position;
 
 uniform sampler2D u_albedo_texture;
 uniform sampler2D u_normal_texture;
@@ -359,7 +382,7 @@ void main()
 
 	//color.xyz = mod(abs(world_pos * 0.01), vec3(1.0)); //to show world pos as a color
 
-	FragColor = vec4(color, 1.0);
+	FragColor = vec4(color, albedo.a);
 	gl_FragDepth = depth;
 }
 
@@ -531,6 +554,9 @@ void main()
 
 
 
+
+
+
 \all_lights
 
 //light_type
@@ -615,3 +641,62 @@ vec3 compute_shadows(vec4 u_light_info, vec3 normal, vec3 u_light_color, vec3 u_
 
 	return light;
 }
+
+
+
+
+
+
+
+\pbr_equations
+
+#define RECIPROCAL_PI 0.3183098861837697
+#define PI 3.14159265359
+
+float D_GGX (const in float NoH, const in float linearRoughness)
+{
+	float a2 = linearRoughness * linearRoughness;
+	float f = (NoH * NoH) * (a2 - 1.0) + 1.0;
+	return a2 / (PI * f * f);
+}
+float F_Schlick( const in float VoH, const in float f0)
+{
+	float f = pow(1.0 - VoH, 5.0);
+	return f0 + (1.0 - f0) * f;
+}
+vec3 F_Schlick( const in float VoH, const in vec3 f0)
+{
+	float f = pow(1.0 - VoH, 5.0);
+	return f0 + (vec3(1.0) - f0) * f;
+}
+
+float GGX(float NdotV, float k)
+{
+	return NdotV / (NdotV * (1.0 - k) + k);
+}
+float G_Smith( float NdotV, float NdotL, float roughness)
+{
+	float k = pow(roughness + 1.0, 2.0) / 8.0;
+	return GGX(NdotL, k) * GGX(NdotV, k);
+}
+float Fd_Burley (const in float NoV, const in float NoL, const in float LoH, const in float linearRoughness)
+{
+        float f90 = 0.5 + 2.0 * linearRoughness * LoH * LoH;
+        float lightScatter = F_Schlick(NoL, f90);
+        float viewScatter  = F_Schlick(NoV, f90);
+        return lightScatter * viewScatter * RECIPROCAL_PI;
+}
+vec3 specularBRDF(float roughness, vec3 f0, float NoH, float NoV, float NoL, float LoH)
+{
+	float a = roughness * roughness;
+	float D = D_GGX( NoH, a );
+	vec3 F = F_Schlick( LoH, f0 );
+	float G = G_Smith( NoV, NoL, roughness );
+		
+	vec3 spec = D * G * F;
+	spec /= (4.0 * NoL * NoV + 1e-6);
+
+	return spec;
+}
+
+
