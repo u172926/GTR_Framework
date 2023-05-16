@@ -251,9 +251,9 @@ void Renderer::renderForward(SCN::Scene* scene, Camera* camera)
 void Renderer::renderSceneNodes(SCN::Scene* scene, Camera* camera)
 {
 	//render entities
-	for (int i = 0; i < scene->entities.size(); ++i)
+	for (int i = 0; i < base_ents.size(); ++i)
 	{
-		BaseEntity* ent = scene->entities[i];
+		BaseEntity* ent = base_ents[i];
 		if (!ent->visible)	continue;
 
 		if (ent->getType() == eEntityType::PREFAB)

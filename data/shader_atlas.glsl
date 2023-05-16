@@ -309,7 +309,7 @@ void main()
 	//vec3 f0 = mix(vec3(0.5), albedo.xyz, metallicness);
 	//vec3 diffuseColor = (1.0 - metallicness) * albedo.xyz;
 	//
-	//vec3 L = normalize(lightDirection);
+	//vec3 L = normalize(u_camera_position - v_world_position);
 	//vec3 H = normalize(V + L);
 	//float NoH = dot(N);
 	//float NoV;
