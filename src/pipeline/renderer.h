@@ -25,15 +25,6 @@ namespace SCN {
 		DEFERRED,
 		FLAT
 	};
-
-	struct RenderCall {
-	public:
-		GFX::Mesh* mesh;
-		Material* material;
-		Matrix44 model;
-
-		float camera_distance;
-	};
 	
 	// This class is in charge of rendering anything in our system.
 	// Separating the render from anything else makes the code cleaner
@@ -54,22 +45,22 @@ namespace SCN {
 		//vector of all the lights of the scene
 		std::vector<LightEntity*> lights;
 		std::vector<LightEntity*> visible_lights;
-		std::vector<RenderCall> render_calls;
-		std::vector<RenderCall> render_calls_alpha;
+		std::vector<BaseEntity*> base_ents;
 
 		//updated every frame
 		Renderer(const char* shaders_atlas_filename );
 
 		//just to be sure we have everything ready for the rendering
-		void setupScene(Camera* camera);
+		void setupScene();
 
 		//add here your functions
 		//...
-		void orderRender(SCN::Node* node, Camera* camera);
+		float distance(vec3* v1, vec3* v2);
 
 		//renders several elements of the scene
 		void renderScene(SCN::Scene* scene, Camera* camera);
 		void renderForward(SCN::Scene* scene, Camera* camera);
+		void renderSceneNodes(SCN::Scene* scene, Camera* camera);
 		void renderDeferred(SCN::Scene* scene, Camera* camera);
 		void renderFrame(SCN::Scene* scene, Camera* camera);
 
@@ -79,7 +70,7 @@ namespace SCN {
 		void renderSkybox(GFX::Texture* cubemap);
 	
 		//to render one node from the prefab and its children
-		void renderNode (const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera);
+		void renderNode(SCN::Node* node, Camera* camera);
 
 		//to render one mesh given its material and transformation matrix
 		void renderMeshWithMaterialFlat(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);

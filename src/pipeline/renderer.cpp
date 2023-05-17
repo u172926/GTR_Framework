@@ -26,7 +26,6 @@ GFX::Mesh sphere;
 GFX::FBO* gbuffer_fbo = nullptr;
 GFX::FBO* illumination_fbo = nullptr;
 
-
 Renderer::Renderer(const char* shader_atlas_filename)
 {
 	render_wireframe = false;
@@ -45,7 +44,7 @@ Renderer::Renderer(const char* shader_atlas_filename)
 	sphere.uploadToVRAM();
 }
 
-void Renderer::setupScene(Camera* camera)
+void Renderer::setupScene()
 {
 	if (scene->skybox_filename.size())
 		skybox_cubemap = GFX::Texture::Get(std::string(scene->base_folder + "/" + scene->skybox_filename).c_str());
@@ -54,9 +53,6 @@ void Renderer::setupScene(Camera* camera)
 
 	//to avoid adding lights infinetly
 	lights.clear();
-	visible_lights.clear();
-	render_calls.clear();
-	render_calls_alpha.clear();
 
 	//process entities
 	for (int i = 0; i < scene->entities.size(); ++i)
@@ -69,17 +65,14 @@ void Renderer::setupScene(Camera* camera)
 		if (ent->getType() == eEntityType::PREFAB)
 		{
 			PrefabEntity* pent = (SCN::PrefabEntity*)ent;
-			if (pent->prefab) orderRender(&pent->root, camera);
+
 		}
 		//light entity
 		else if (ent->getType() == eEntityType::LIGHT)
 		{
-			LightEntity* lent = (SCN::LightEntity*)ent;
-			lights.push_back(lent);
+			lights.push_back((SCN::LightEntity*)ent);
 		}
 	}
-	std::sort(render_calls.begin(), render_calls.end(), [](const RenderCall a, const RenderCall b) 
-		{ return a.camera_distance > b.camera_distance; });
 
 	generateShadowMaps();
 
@@ -88,7 +81,6 @@ void Renderer::setupScene(Camera* camera)
 void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 {
 	this->scene = scene;
-<<<<<<< Updated upstream
 	setupScene();
 
 	//base_ents = scene->entities;
@@ -107,14 +99,12 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 
 	//std::rotate(base_ents.begin(), base_ents.begin() + 2, base_ents.end());
 	//std::rotate(base_ents.begin(), base_ents.begin() + 3, base_ents.end());
-=======
-	setupScene(camera);
->>>>>>> Stashed changes
 
 	
 	renderFrame(scene, camera);
 
 	if (show_shadowmaps) debugShadowMaps();
+
 }
 
 void Renderer::renderFrame(SCN::Scene* scene, Camera* camera)
@@ -144,20 +134,7 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		//gbuffer_fbo->enableAllBuffers();
 		camera->enable();
-
-		//render entities (first opaques)
-		for (int i = 0; i < render_calls_alpha.size(); ++i)
-		{
-			RenderCall rc = render_calls_alpha[i];
-			renderNode(rc.model, rc.mesh, rc.material, camera);
-		}
-
-		//render entities
-		for (int i = 0; i < render_calls.size(); ++i)
-		{
-			RenderCall rc = render_calls[i];
-			renderNode(rc.model, rc.mesh, rc.material, camera);
-		}
+		renderSceneNodes(scene, camera);
 
 	gbuffer_fbo->unbind();
 
@@ -204,25 +181,6 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 	glDisable(GL_BLEND);
 
-<<<<<<< Updated upstream
-=======
-		glDisable(GL_DEPTH_TEST);
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_ONE, GL_ONE);
-
-		for (auto light : lights)
-		{
-			shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
-			shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
-			lightToShader(light, shader);
-			mesh->render(GL_TRIANGLES);
-		}
-		glDisable(GL_BLEND);
-
-		//call for alpha objects
-
-	illumination_fbo->unbind();
->>>>>>> Stashed changes
 
 	if (show_gbuffers)
 	{
@@ -266,18 +224,22 @@ void Renderer::renderForward(SCN::Scene* scene, Camera* camera)
 	//render skybox
 	if (skybox_cubemap && render_mode != eRenderMode::FLAT)	renderSkybox(skybox_cubemap);
 
-	//render entities (first opaques)
-	for (int i = 0; i < render_calls_alpha.size(); ++i)
-	{	
-		RenderCall rc = render_calls_alpha[i];
-		renderNode(rc.model, rc.mesh, rc.material, camera);
-	}
+	renderSceneNodes(scene, camera);
+}
 
+void Renderer::renderSceneNodes(SCN::Scene* scene, Camera* camera)
+{
 	//render entities
-	for (int i = 0; i < render_calls.size(); ++i)
+	for (int i = 0; i < scene->entities.size(); ++i)
 	{
-		RenderCall rc = render_calls[i];
-		renderNode(rc.model, rc.mesh, rc.material, camera);
+		BaseEntity* ent = scene->entities[i];
+		if (!ent->visible)	continue;
+
+		if (ent->getType() == eEntityType::PREFAB)
+		{
+			PrefabEntity* pent = (SCN::PrefabEntity*)ent;
+			renderNode(&pent->root, camera);
+		}
 	}
 }
 
@@ -309,41 +271,42 @@ void Renderer::renderSkybox(GFX::Texture* cubemap)
 }
 
 //renders a node of the prefab and its children
-void Renderer::renderNode(Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera)
+void Renderer::renderNode(SCN::Node* node, Camera* camera)
 {
-	//if (!node->visible)
-	//	return;
+	if (!node->visible)
+		return;
 
 	//compute global matrix
-	//Matrix44 node_model = node->getGlobalMatrix(true);
+	Matrix44 node_model = node->getGlobalMatrix(true);
 
 	//does this node have a mesh? then we must render it
-	if (mesh && material)
+	if (node->mesh && node->material)
 	{
 		//compute the bounding box of the object in world space (by using the mesh bounding box transformed to world space)
-		BoundingBox world_bounding = transformBoundingBox(model, mesh->box);
+		BoundingBox world_bounding = transformBoundingBox(node_model,node->mesh->box);
 		
 		//if bounding box is inside the camera frustum then the object is probably visible
 		if (camera->testBoxInFrustum(world_bounding.center, world_bounding.halfsize) )
 		{
 			//switch between render modes
 			if(render_boundaries)
-				mesh->renderBounding(model, true);
+				node->mesh->renderBounding(node_model, true);
 			switch (render_mode)
 			{			
-				case eRenderMode::FLAT: renderMeshWithMaterialFlat(model, mesh, material); break;
-				case eRenderMode::TEXTURED: renderMeshWithMaterial(model, mesh, material); break;
-				case eRenderMode::LIGHTS: renderMeshWithMaterialLight(model, mesh, material); break;
-				case eRenderMode::DEFERRED: renderMeshWithMaterialGBuffers(model, mesh, material); break;
+				case eRenderMode::FLAT: renderMeshWithMaterialFlat(node_model, node->mesh, node->material); break;
+				case eRenderMode::TEXTURED: renderMeshWithMaterial(node_model, node->mesh, node->material); break;
+				case eRenderMode::LIGHTS: renderMeshWithMaterialLight(node_model, node->mesh, node->material); break;
+				case eRenderMode::DEFERRED: renderMeshWithMaterialGBuffers(node_model, node->mesh, node->material); break;
+
 			}
 		}
 	}
 
 	//iterate recursively with children
-	//for (int i = 0; i < node->children.size(); ++i)
-	//{
-	//	renderNode(node->children[i], camera);
-	//}
+	for (int i = 0; i < node->children.size(); ++i)
+	{
+		renderNode(node->children[i], camera);
+	}
 }
 
 //renders a mesh given its transform and material texture
@@ -515,8 +478,6 @@ void Renderer::renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh
 	//this is used to say which is the alpha threshold to what we should not paint a pixel on the screen (to cut polygons according to texture alpha)
 	shader->setUniform("u_alpha_cutoff", material->alpha_mode == SCN::eAlphaMode::MASK ? material->alpha_cutoff : 0.001f);
 	shader->setUniform("u_ambient_light", scene->ambient_light);
-	shader->setUniform("u_camera_position", camera->eye);
-
 
 	if (render_wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
@@ -638,21 +599,13 @@ void SCN::Renderer::cameraToShader(Camera* camera, GFX::Shader* shader)
 void SCN::Renderer::lightToShader(LightEntity* light, GFX::Shader* shader)
 {
 	shader->setUniform("u_light_position", light->root.model.getTranslation()); //for point and spot
+	shader->setUniform("u_light_front", light->root.model.rotateVector(vec3(0, 0, 1))); //for spot and directional
 	shader->setUniform("u_light_color", light->color * light->intensity);
 	shader->setUniform("u_light_info", vec4((int)light->light_type, light->near_distance, light->max_distance, 0)); //0 as a place holder for another porperty
-<<<<<<< Updated upstream
 	shader->setUniform("u_light_cone", vec2(cos(light->cone_info.x * DEG2RAD), cos(light->cone_info.y * DEG2RAD))); //cone for the spot light
-=======
-	
-	if (light->light_type == eLightType::SPOT || light->light_type == eLightType::DIRECTIONAL)
-		shader->setUniform("u_light_front", light->root.model.rotateVector(vec3(0, 0, 1))); 
-
-	if(light->light_type == eLightType::SPOT)
-		shader->setUniform("u_light_cone", vec2(cos(light->cone_info.x * DEG2RAD), cos(light->cone_info.y * DEG2RAD))); //cone for the spot light
->>>>>>> Stashed changes
 
 	shader->setUniform("u_shadow_param", vec2(light->shadowmap ? 1 : 0, light->shadow_bias));
-	if (light->shadowmap && light->cast_shadows)
+	if (light->shadowmap)
 	{
 		shader->setUniform("u_shadowmap", light->shadowmap, 8); //use one of the last slots (16 max)
 		shader->setUniform("u_shadow_viewproj", light->shadow_viewproj);
@@ -665,36 +618,18 @@ void Renderer::showUI()
 {
 	ImGui::Checkbox("Wireframe", &render_wireframe);
 	ImGui::Checkbox("Boundaries", &render_boundaries);
+	ImGui::Checkbox("Show ShadowMaps", &show_shadowmaps);
+	ImGui::Checkbox("Show Gbuffers", &show_gbuffers);
 
 	ImGui::Combo("Render Mode", (int*)&render_mode, "TEXTURED\0LIGHTS\0DEFERRED" , 3);
 
-<<<<<<< Updated upstream
-=======
-	if (render_mode == eRenderMode::LIGHTS || render_mode == eRenderMode::DEFERRED)
-	{
-		ImGui::Checkbox("Show ShadowMaps", &show_shadowmaps);
-	}
-	if (render_mode == eRenderMode::DEFERRED)
-	{		
-		ImGui::Checkbox("Show Gbuffers", &show_gbuffers);
-
-		if (!show_gbuffers)
-		{
-			ImGui::SliderFloat("tonemapper_scale", &tonemapper_scale, 0, 2);
-			ImGui::SliderFloat("average_lum", &average_lum, 0, 2);
-			ImGui::SliderFloat("lum_white2", &lum_white2, 0, 2);
-			ImGui::SliderFloat("gamma", &gamma, 0, 2);
-		}
-	}
-
->>>>>>> Stashed changes
 	//add here your stuff
 	//...
 }
 
 void Renderer::generateShadowMaps()
 {
-	Camera* camera = new Camera();
+	Camera camera;
 
 	GFX::startGPULabel("Shadowmaps");
 
@@ -724,24 +659,24 @@ void Renderer::generateShadowMaps()
 		vec3 pos = light->root.model.getTranslation();
 		vec3 front = light->root.model.rotateVector(vec3(0, 0, -1));
 		vec3 up = vec3(0, 1, 0);
-		camera->lookAt(pos, pos + front, up);
+		camera.lookAt(pos, pos + front, up);
 
 		if (light->light_type == eLightType::SPOT)
 		{
-			camera->setPerspective(light->cone_info.y * 2, 1.0, light->near_distance, light->max_distance);
+			camera.setPerspective(light->cone_info.y * 2, 1.0, light->near_distance, light->max_distance);
 		}
 		if (light->light_type == eLightType::DIRECTIONAL)
 		{
-			camera->setOrthographic(-1000.0, 1000.0, -1000.0, 1000.0, light->near_distance, light->max_distance);
+			camera.setOrthographic(-1000.0, 1000.0, -1000.0, 1000.0, light->near_distance, light->max_distance);
 		}		
 
 		light->shadowmap_fbo->bind(); //everything we render until the unbind will be inside this texture
 
-		renderFrame(scene, camera);
+		renderFrame(scene, &camera);
 
 		light->shadowmap_fbo->unbind();
 
-		light->shadow_viewproj = camera->viewprojection_matrix;
+		light->shadow_viewproj = camera.viewprojection_matrix;
 	}
 
 	render_mode = prev;
@@ -773,42 +708,16 @@ void Renderer::debugShadowMaps()
 	vec2 size = CORE::getWindowSize();
 	glViewport(0, 0, size.x, size.y);
 
-	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_BLEND);
 }
 
-void Renderer::orderRender(SCN::Node* node, Camera* camera)
+float Renderer::distance(vec3* v1, vec3* v2)
 {
-	if (!node->visible)
-		return;
+	float vx = (v1->x - v2->x) * (v1->x - v2->x);
+	float vy = (v1->y - v2->y) * (v1->y - v2->y);
+	float vz = (v1->z - v2->z) * (v1->z - v2->z);
 
-	//compute global matrix
-	Matrix44 node_model = node->getGlobalMatrix(true);
-
-	//does this node have a mesh? then we must render it
-	if (node->mesh && node->material)
-	{
-		//compute the bounding box of the object in world space (by using the mesh bounding box transformed to world space)
-		BoundingBox world_bounding = transformBoundingBox(node_model, node->mesh->box);
-
-		//if bounding box is inside the camera frustum then the object is probably visible
-		if (camera->testBoxInFrustum(world_bounding.center, world_bounding.halfsize))
-		{
-			Vector3f node_pos = node_model.getTranslation();
-			RenderCall rc;
-			rc.mesh = node->mesh;
-			rc.material = node->material;
-			rc.model = node_model;
-			rc.camera_distance = camera->eye.distance(node_pos);
-			  
-			//material to the appropriate render call if it has alpha or not
-			rc.material->alpha_mode == eAlphaMode::NO_ALPHA ? render_calls_alpha.push_back(rc) : render_calls.push_back(rc);
-		}
-	}
-
-	//iterate recursively with children
-	for (int i = 0; i < node->children.size(); ++i)
-		orderRender(node->children[i], camera);
+	float dist = sqrt(vx + vy + vz);
+	return dist;
 }
 
 #else
