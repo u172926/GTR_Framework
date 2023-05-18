@@ -7,12 +7,11 @@ skybox basic.vs skybox.fs
 depth quad.vs depth.fs
 multi basic.vs multi.fs
 
-
 gbuffers basic.vs gbuffers.fs
 deferred_global quad.vs deferred_global.fs
-deferred_light quad.vs deferred_light.fs
+deferred_light quad.vs deferred_light.fs 
+deferred_world_color quad.vs deferred_world_color.fs 
 tonemapper quad.vs tonemapper.fs
-
 
 
 
@@ -58,10 +57,6 @@ void main()
 	gl_Position = u_viewprojection * vec4( v_world_position, 1.0 );
 }
 
-
-
-
-
 \quad.vs
 
 #version 330 core
@@ -76,13 +71,6 @@ void main()
 	gl_Position = vec4( a_vertex, 1.0 );
 }
 
-
-
-
-
-
-
-
 \flat.fs
 
 #version 330 core
@@ -95,11 +83,6 @@ void main()
 {
 	FragColor = u_color;
 }
-
-
-
-
-
 
 \texture.fs
 
@@ -306,9 +289,6 @@ void main()
 	vec3 normal_map = texture(u_normal_texture, v_uv).rgb;
 	normal_map = normalize(normal_map * 2.0 - 1.0);
 
-
-
-
 	vec3 WP = v_world_position;
 	vec3 N = normalize(v_normal);
 	vec3 V = normalize(u_camera_position - WP); 
@@ -316,9 +296,6 @@ void main()
 
 	mat3 TBN = cotangent_frame(N, WP, v_uv);
 	vec3 normal = normalize(TBN * normal_map); //perturbed
-
-
-
 
 	vec3 light = vec3(0.0);
 	light += u_ambient_light * occlusion;
@@ -391,14 +368,13 @@ void main()
 		discard;
 
 	float occlusion = texture(u_metallic_texture, v_uv).r;
-	float roughness = texture(u_metallic_texture, v_uv).g;
-	float metallicness = texture(u_metallic_texture, v_uv).b;
+	float roughness = texture(u_metallic_texture, v_uv).g * 0.2;
+	float metallicness = texture(u_metallic_texture, v_uv).b * 0.2;
+	//roughness *= u_roughness_factor;
+	//metallicness *= u_metallic_factor;
 
 	vec3 normal_map = texture(u_normal_texture, v_uv).rgb;
 	normal_map = normalize(normal_map * 2.0 - 1.0);
-
-
-
 
 	vec3 WP = v_world_position;
 	vec3 N = normalize(v_normal);
@@ -409,10 +385,6 @@ void main()
 	vec3 L = u_light_front;
 	vec3 H = normalize(V + L);
 
-	
-
-
-
 
 	vec3 light = vec3(0.0);
 	light += u_ambient_light * occlusion;
@@ -420,23 +392,20 @@ void main()
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0 && u_light_info.x != NO_LIGHT) shadow_factor = testShadow(v_world_position);
 
-	vec3 f0 = mix( vec3(0.5), albedo.xyz, metallicness );
+	vec3 f0 = mix( vec3(0.5), albedo.xyz, metallicness);
 	vec3 diffuseColor = (1.0 - metallicness) * albedo.xyz;
 
-	light += compute_light(u_light_info, normal, u_light_color, u_light_position,
-						   u_light_front, u_light_cone, v_world_position) * diffuseColor;
+	light += compute_light(u_light_info, normal, u_light_color, u_light_position, u_light_front, u_light_cone, v_world_position) * diffuseColor;
 
-    if(roughness != 0.0) light += specular_phong_pbr(normal, L, H, V, WP, roughness, f0, u_light_position); // * u_light_color;
+    if(roughness != 0.0) light += specular_phong_pbr(normal, L, V, WP, roughness, f0, u_light_position) * u_light_color;
 	
 	light *= shadow_factor;
-
-
-
 
 	vec3 color = albedo.rgb * light + emissive;
 	
 	FragColor = vec4(color, albedo.a);
 }
+
 
 
 
@@ -499,6 +468,39 @@ void main()
 
 
 
+
+\deferred_world_color.fs
+
+#version 330 core
+
+uniform sampler2D u_depth_texture;
+
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+
+out vec4 FragColor;
+
+void main()
+{	
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	float depth = texture(u_depth_texture, uv).r;
+	if(depth == 1.0) discard;
+
+	vec4 screen_pos = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_pos_proj = u_ivp * screen_pos;
+	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
+
+	vec3 color = mod(abs(world_pos * 0.01), vec3(1.0)); //to show world pos as a color
+
+	FragColor = vec4(color, 1.0);
+}
+
+
+
+
+
+
 \deferred_global.fs
 
 #version 330 core
@@ -508,6 +510,8 @@ in vec2 v_uv;
 uniform sampler2D u_albedo_texture;
 uniform sampler2D u_emissive_texture;
 uniform sampler2D u_depth_texture;
+uniform sampler2D u_metallic_texture;
+
 
 uniform vec3 u_ambient_light;
 
@@ -521,12 +525,13 @@ void main()
 
 	vec4 albedo = texture(u_albedo_texture, v_uv);	
 	vec4 emissive = texture(u_emissive_texture, v_uv);
+	float occlusion = texture(u_metallic_texture, v_uv).r;
 
-	vec4 color = vec4(0.0);
+	vec3 color = vec3(0.0);
 
-	color.xyz += emissive.xyz + albedo.xyz * u_ambient_light;
+	color.xyz += emissive.xyz + albedo.xyz * u_ambient_light * occlusion;
 
-	FragColor = color;
+	FragColor = vec4(color, 1.0);
 	gl_FragDepth = depth;
 }
 
@@ -765,7 +770,7 @@ float specular_phong(vec3 N, vec3 L, vec3 V, vec3 WP, float ks, float alpha, vec
 
 	return specular;
 }
-vec3 specular_phong_pbr(vec3 N, vec3 L, vec3 H, vec3 V, vec3 WP, float ks, vec3 alpha, vec3 u_light_position)
+vec3 specular_phong_pbr(vec3 N, vec3 L, vec3 V, vec3 WP, float ks, vec3 alpha, vec3 u_light_position)
 {
 	vec3 specular = vec3(0.0);
 
@@ -775,7 +780,9 @@ vec3 specular_phong_pbr(vec3 N, vec3 L, vec3 H, vec3 V, vec3 WP, float ks, vec3 
 		float dist = length(L);
 		L /= dist; //to normalize L
 	}
-	
+
+	vec3 H = normalize(V+L);
+
 	float NdotH = max(dot(N, H), 0.0);
 	float NdotV = max(dot(N, V), 0.0);
 	float NdotL = max(dot(N, L), 0.0);

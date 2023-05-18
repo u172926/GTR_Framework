@@ -22,9 +22,14 @@ namespace SCN {
 	enum eRenderMode {
 		TEXTURED,
 		LIGHTS,
-		PBR,
-		DEFERRED,
-		FLAT
+		DEFERRED
+	};
+
+	enum eShaderMode {
+		FLAT,
+		TEXTURE,
+		MULTIPASS,
+		PBR
 	};
 
 	struct RenderCall {
@@ -46,8 +51,10 @@ namespace SCN {
 		bool show_shadowmaps;
 		bool show_gbuffers;
 		bool dithering;
+		bool global_position;
 
 		eRenderMode render_mode;
+		eShaderMode shader_mode;
 
 		float tonemapper_scale;
 		float average_lum;
@@ -89,7 +96,6 @@ namespace SCN {
 		void renderNode(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera);
 
 		//to render one mesh given its material and transformation matrix
-		void renderMeshWithMaterialFlat(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 		void renderMeshWithMaterial(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 		void renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 		void renderMeshWithMaterialGBuffers(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
