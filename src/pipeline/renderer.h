@@ -50,6 +50,7 @@ namespace SCN {
 		bool render_boundaries;
 		bool show_shadowmaps;
 		bool show_gbuffers;
+		bool shadowmap_on;
 		bool dithering;
 		bool global_position;
 
@@ -93,10 +94,11 @@ namespace SCN {
 		void renderSkybox(GFX::Texture* cubemap);
 
 		//to render one node from the prefab and its children
-		void renderNode(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera);
-
+		void renderNode(Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera);
+		
 		//to render one mesh given its material and transformation matrix
 		void renderMeshWithMaterial(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
+		void renderMeshWithMaterialFlat(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 		void renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 		void renderMeshWithMaterialGBuffers(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 
