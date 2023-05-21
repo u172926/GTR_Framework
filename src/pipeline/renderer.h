@@ -53,6 +53,8 @@ namespace SCN {
 		bool shadowmap_on;
 		bool dithering;
 		bool global_position;
+		bool show_ssao;
+		bool reset_tonemapper;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
@@ -71,6 +73,13 @@ namespace SCN {
 		std::vector<LightEntity*> visible_lights;
 		std::vector<RenderCall> render_calls;
 		std::vector<RenderCall> render_calls_alpha;
+		
+		std::vector<vec3> ssao_points;
+		float ssao_radius;
+
+		GFX::FBO* gbuffer_fbo;
+		GFX::FBO* illumination_fbo;
+		GFX::FBO* ssao_fbo;
 
 		//updated every frame
 		Renderer(const char* shaders_atlas_filename);
@@ -111,3 +120,7 @@ namespace SCN {
 	};
 
 };
+
+std::vector<vec3> generateSpherePoints(int num, float radius, bool hemi);
+
+

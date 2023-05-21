@@ -23,22 +23,28 @@ using namespace SCN;
 //some globals
 GFX::Mesh sphere;
 
-GFX::FBO* gbuffer_fbo = nullptr;
-GFX::FBO* illumination_fbo = nullptr;
-
 Renderer::Renderer(const char* shader_atlas_filename)
 {
 	render_wireframe = false;
 	render_boundaries = false;
-	render_mode = eRenderMode::LIGHTS; //default
-	shader_mode = eShaderMode::PBR;
+	render_mode = eRenderMode::DEFERRED; //default
+	shader_mode = eShaderMode::MULTIPASS;
+
 	scene = nullptr;
 	skybox_cubemap = nullptr;
 	show_shadowmaps = false;
 	show_gbuffers = false;
 	shadowmap_on = false;
 	dithering = false;
+	show_ssao = false;
 	global_position = false;
+
+	ssao_points = generateSpherePoints(64, 1, false);
+	ssao_radius = 5.0;
+
+	gbuffer_fbo = nullptr;
+	illumination_fbo = nullptr;
+	ssao_fbo = nullptr;
 
 	tonemapper_scale = 1.0;
 	average_lum = 1.0;
@@ -116,6 +122,10 @@ void Renderer::renderFrame(SCN::Scene* scene, Camera* camera)
 void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 {
 	vec2 size = CORE::getWindowSize();
+	GFX::Mesh* mesh = GFX::Mesh::getQuad();
+	GFX::Shader* shader = nullptr;
+
+	//re-get window size
 
 	//generate gbudder
 	if (!gbuffer_fbo)
@@ -126,7 +136,12 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 	if(!illumination_fbo)
 	{
 		illumination_fbo = new GFX::FBO();
-		illumination_fbo->create(size.x, size.y, 1, GL_RGB, GL_HALF_FLOAT); //half_float for SDR
+		illumination_fbo->create(size.x, size.y, 1, GL_RGB, GL_HALF_FLOAT, false); //half_float for SDR	
+	}
+	if (!ssao_fbo)
+	{
+		ssao_fbo = new GFX::FBO();
+		ssao_fbo->create(size.x, size.y, 3, GL_RGB, GL_UNSIGNED_BYTE, false);
 	}
 
 	camera->enable();
@@ -153,7 +168,30 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		}
 
 	gbuffer_fbo->unbind();
-	camera = Camera::current;
+
+	ssao_fbo->bind();
+
+		glDisable(GL_DEPTH_TEST);
+		glDisable(GL_BLEND);
+
+		shader = GFX::Shader::Get("ssao");
+
+		shader->enable();
+		shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
+		shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 2);
+		shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
+		shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
+
+		shader->setUniform3Array("u_points", (float*)(&ssao_points[0]), 64);
+		shader->setUniform("u_radius", ssao_radius);
+
+		shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+		shader->setUniform("u_camera_pos", camera->eye);
+		shader->setUniform("u_camera_front", camera->front);	
+
+		mesh->render(GL_TRIANGLES);
+
+	ssao_fbo->unbind();
 
 
 	if (show_gbuffers)
@@ -169,7 +207,7 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		gbuffer_fbo->color_textures[2]->toViewport();
 		glViewport(size.x / 2, 0, size.x / 2, size.y / 2);
 		//depth
-		GFX::Shader* shader = GFX::Shader::getDefaultShader("linear_depth");
+		shader = GFX::Shader::getDefaultShader("linear_depth");
 		shader->enable();
 		shader->setUniform("u_camera_nearfar", vec2(camera->near_plane, camera->far_plane));
 		gbuffer_fbo->depth_texture->toViewport(shader);
@@ -190,8 +228,7 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 			glDisable(GL_BLEND);
 			glDisable(GL_DEPTH_TEST);
 
-			GFX::Mesh* mesh = GFX::Mesh::getQuad();
-			GFX::Shader* shader = GFX::Shader::Get("deferred_global");
+			shader = GFX::Shader::Get("deferred_global");
 			
 			shader->enable();
 			shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
@@ -220,7 +257,8 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 					if (light->light_type == eLightType::SPOT || light->light_type == eLightType::POINT) 
 						shader = GFX::Shader::Get("deferred_goemetry");
-					else shader = GFX::Shader::Get("deferred_light");
+					else 
+						shader = GFX::Shader::Get("deferred_light");
 
 					shader->enable();
 					shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
@@ -236,7 +274,6 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 					shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
 					lightToShader(light, shader);
 
-
 					mesh->render(GL_TRIANGLES);
 				}
 
@@ -249,7 +286,7 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 		illumination_fbo->color_textures[0]->toViewport();
 
-		//apply tone mapper
+		//apply tone mapper	
 		if (!global_position)
 		{
 			shader = GFX::Shader::Get("tonemapper");
@@ -261,6 +298,9 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 			illumination_fbo->color_textures[0]->toViewport(shader);
 		}
+		
+		if (show_ssao) ssao_fbo->color_textures[0]->toViewport();
+
 	}
 }
 
@@ -716,9 +756,6 @@ void SCN::Renderer::lightToShader(LightEntity* light, GFX::Shader* shader)
 
 	if (light->light_type == eLightType::SPOT)
 		shader->setUniform("u_light_cone", vec2(cos(light->cone_info.x * DEG2RAD), cos(light->cone_info.y * DEG2RAD))); //cone for the spot light
-	
-	if (light->light_type == eLightType::POINT)
-		light->max_distance *= 1;
 
 	shader->setUniform("u_shadow_param", vec2(light->shadowmap ? 1 : 0, light->shadow_bias));
 	if (light->shadowmap && light->cast_shadows)
@@ -757,16 +794,15 @@ void Renderer::showUI()
 		ImGui::Checkbox("Show ShadowMaps", &show_shadowmaps);
 		ImGui::Checkbox("Show Gbuffers", &show_gbuffers);
 		ImGui::Checkbox("Show GlobalPosition", &global_position);
+		ImGui::Checkbox("Show SSAO", &show_ssao);
 
+		ImGui::SliderFloat("tonemapper_scale", &tonemapper_scale, 0, 2);
+		ImGui::SliderFloat("average_lum", &average_lum, 0, 2);
+		ImGui::SliderFloat("lum_white2", &lum_white2, 0, 2);
+		ImGui::SliderFloat("gamma", &gamma, 0, 2);
 
-		if (!show_gbuffers)
-		{
-			ImGui::SliderFloat("tonemapper_scale", &tonemapper_scale, 0, 2);
-			ImGui::SliderFloat("average_lum", &average_lum, 0, 2);
-			ImGui::SliderFloat("lum_white2", &lum_white2, 0, 2);
-			ImGui::SliderFloat("gamma", &gamma, 0, 2);
-		}
-	}
+		if (show_ssao) ImGui::SliderFloat("SSAO sphere radius", &ssao_radius, 0, 50);
+	}	
 }
 
 void Renderer::generateShadowMaps()
@@ -853,6 +889,32 @@ void Renderer::debugShadowMaps()
 	glEnable(GL_BLEND);
 
 }
+
+std::vector<vec3> generateSpherePoints(int num,	float radius, bool hemi)
+{
+	std::vector<vec3> points;
+	points.resize(num);
+	for (int i = 0; i < num; i += 1)
+	{
+		vec3& p = points[i];
+		float u = random();
+		float v = random();
+		float theta = u * 2.0 * PI;
+		float phi = acos(2.0 * v - 1.0);
+		float r = cbrt(random() * 0.9 + 0.1) * radius;
+		float sinTheta = sin(theta);
+		float cosTheta = cos(theta);
+		float sinPhi = sin(phi);
+		float cosPhi = cos(phi);
+		p.x = r * sinPhi * cosTheta;
+		p.y = r * sinPhi * sinTheta;
+		p.z = r * cosPhi;
+		if (hemi && p.z < 0)
+			p.z *= -1.0;
+	}
+	return points;
+}
+
 
 #else
 void Renderer::showUI() {}
