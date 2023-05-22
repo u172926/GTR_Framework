@@ -453,7 +453,7 @@ void main()
 
 	vec3 color = albedo.rgb * light; 
 
-	FragColor = vec4(color, 1.0);
+	FragColor = vec4(color, albedo.a);
 	gl_FragDepth = depth;
 }
 
@@ -523,7 +523,7 @@ void main()
 
 	vec3 color = albedo.rgb * light; 
 
-	FragColor = vec4(color, 1.0);
+	FragColor = vec4(color,albedo.a);
 	gl_FragDepth = depth;
 }
 

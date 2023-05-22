@@ -27,8 +27,8 @@ Renderer::Renderer(const char* shader_atlas_filename)
 {
 	render_wireframe = false;
 	render_boundaries = false;
-	render_mode = eRenderMode::LIGHTS; //default
-	shader_mode = eShaderMode::MULTIPASS;
+	render_mode = eRenderMode::TEXTURED; //default
+	shader_mode = eShaderMode::TEXTURE;
 
 	scene = nullptr;
 	skybox_cubemap = nullptr;
@@ -167,31 +167,6 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 	gbuffer_fbo->unbind();
 
-	ssao_fbo->bind();
-
-		glDisable(GL_DEPTH_TEST);
-		glDisable(GL_BLEND);
-
-		shader = GFX::Shader::Get("ssao");
-
-		shader->enable();
-		shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
-		shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 2);
-		shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
-		shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
-
-		shader->setUniform3Array("u_points", (float*)(&ssao_points[0]), 64);
-		shader->setUniform("u_radius", ssao_radius);
-
-		shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
-		shader->setUniform("u_camera_pos", camera->eye);
-		shader->setUniform("u_camera_front", camera->front);	
-
-		quad->render(GL_TRIANGLES);
-
-	ssao_fbo->unbind();
-
-
 	if (show_gbuffers)
 	{
 		//albedo
@@ -236,17 +211,17 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 			shader->setUniform("u_ambient_light", scene->ambient_light);
 			
 			quad->render(GL_TRIANGLES);
-			camera = Camera::current;
 
 			for (int i = 0; i < lights.size(); i++)
 			{
-
 				LightEntity* light = lights[i];
 
-				if (light->light_type == eLightType::SPOT || light->light_type == eLightType::POINT)
-					shader = GFX::Shader::Get("deferred_geometry");
-				else
-					shader = GFX::Shader::Get("deferred_light");
+				//if (light->light_type == eLightType::SPOT || light->light_type == eLightType::POINT)
+				//	shader = GFX::Shader::Get("deferred_geometry");
+				//else
+					shader = GFX::Shader::Get("deferred_light"); 
+				
+				//we have commented the lines above to at least be albe to see all of the lights, even if they are rendered with quads
 				
 				shader->enable();
 				shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
@@ -254,13 +229,14 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 				shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
 				shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
 
+				shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
+				shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
+
+				lightToShader(light, shader);
+
 				glDisable(GL_DEPTH_TEST);
 				glEnable(GL_BLEND);
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-
-				shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
-				shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
-				lightToShader(light, shader);
 
 				quad->render(GL_TRIANGLES);
 			}
@@ -295,7 +271,31 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 			illumination_fbo->color_textures[0]->toViewport(shader);
 		}
-		
+
+		ssao_fbo->bind();
+
+			glDisable(GL_DEPTH_TEST);
+			glDisable(GL_BLEND);
+
+			shader = GFX::Shader::Get("ssao");
+
+			shader->enable();
+			shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
+			shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 2);
+			shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
+			shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
+
+			shader->setUniform3Array("u_points", (float*)(&ssao_points[0]), 64);
+			shader->setUniform("u_radius", ssao_radius);
+
+			shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+			shader->setUniform("u_camera_pos", camera->eye);
+			shader->setUniform("u_camera_front", camera->front);
+
+			quad->render(GL_TRIANGLES);
+
+		ssao_fbo->unbind();
+
 		if (show_ssao) ssao_fbo->color_textures[0]->toViewport();
 
 	}
@@ -750,7 +750,6 @@ void SCN::Renderer::lightToShader(LightEntity* light, GFX::Shader* shader)
 
 	if (light->light_type == eLightType::SPOT || light->light_type == eLightType::DIRECTIONAL)
 		shader->setUniform("u_light_front", light->root.model.rotateVector(vec3(0, 0, 1)));
-	
 
 	if (light->light_type == eLightType::SPOT)
 		shader->setUniform("u_light_cone", vec2(cos(light->cone_info.x * DEG2RAD), cos(light->cone_info.y * DEG2RAD))); //cone for the spot light
@@ -821,7 +820,7 @@ void Renderer::generateShadowMaps()
 
 		if (!light->shadowmap_fbo) //build shadowmap fbo if we dont have one
 		{
-			int size{};
+			int size;
 			if (light->light_type == eLightType::SPOT) size = 4096;
 			if (light->light_type == eLightType::DIRECTIONAL) size = 15000;
 
