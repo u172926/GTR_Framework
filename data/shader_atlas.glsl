@@ -10,7 +10,7 @@ multi basic.vs multi.fs
 gbuffers basic.vs gbuffers.fs
 deferred_global quad.vs deferred_global.fs
 deferred_light quad.vs deferred_light.fs 
-deferred_goemetry quad.vs deferred_goemetry.fs 
+deferred_geometry basic.vs deferred_geometry.fs 
 deferred_world_color quad.vs deferred_world_color.fs 
 tonemapper quad.vs tonemapper.fs
 
@@ -453,7 +453,7 @@ void main()
 
 	vec3 color = albedo.rgb * light; 
 
-	FragColor = vec4(color, albedo.a);
+	FragColor = vec4(color, 1.0);
 	gl_FragDepth = depth;
 }
 
@@ -462,7 +462,7 @@ void main()
 
 
 
-\deferred_goemetry.fs
+\deferred_geometry.fs
 
 #version 330 core
 
@@ -523,7 +523,7 @@ void main()
 
 	vec3 color = albedo.rgb * light; 
 
-	FragColor = vec4(color, albedo.a);
+	FragColor = vec4(color, 1.0);
 	gl_FragDepth = depth;
 }
 

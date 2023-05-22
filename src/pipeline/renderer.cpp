@@ -27,7 +27,7 @@ Renderer::Renderer(const char* shader_atlas_filename)
 {
 	render_wireframe = false;
 	render_boundaries = false;
-	render_mode = eRenderMode::DEFERRED; //default
+	render_mode = eRenderMode::LIGHTS; //default
 	shader_mode = eShaderMode::MULTIPASS;
 
 	scene = nullptr;
@@ -122,10 +122,8 @@ void Renderer::renderFrame(SCN::Scene* scene, Camera* camera)
 void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 {
 	vec2 size = CORE::getWindowSize();
-	GFX::Mesh* mesh = GFX::Mesh::getQuad();
+	GFX::Mesh* quad = GFX::Mesh::getQuad();
 	GFX::Shader* shader = nullptr;
-
-	//re-get window size
 
 	//generate gbudder
 	if (!gbuffer_fbo)
@@ -154,7 +152,7 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		//gbuffer_fbo->enableAllBuffers();
 
-		//render entities (first opaques)
+		//render entities (first ones with alpha)
 		for (int i = 0; i < render_calls_alpha.size(); ++i)
 		{
 			RenderCall rc = render_calls_alpha[i];
@@ -189,7 +187,7 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		shader->setUniform("u_camera_pos", camera->eye);
 		shader->setUniform("u_camera_front", camera->front);	
 
-		mesh->render(GL_TRIANGLES);
+		quad->render(GL_TRIANGLES);
 
 	ssao_fbo->unbind();
 
@@ -237,8 +235,37 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 			shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
 			shader->setUniform("u_ambient_light", scene->ambient_light);
 			
-			mesh->render(GL_TRIANGLES);
+			quad->render(GL_TRIANGLES);
 			camera = Camera::current;
+
+			for (int i = 0; i < lights.size(); i++)
+			{
+
+				LightEntity* light = lights[i];
+
+				if (light->light_type == eLightType::SPOT || light->light_type == eLightType::POINT)
+					shader = GFX::Shader::Get("deferred_geometry");
+				else
+					shader = GFX::Shader::Get("deferred_light");
+				
+				shader->enable();
+				shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
+				shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
+				shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
+				shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
+
+				glDisable(GL_DEPTH_TEST);
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+
+				shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
+				shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
+				lightToShader(light, shader);
+
+				quad->render(GL_TRIANGLES);
+			}
+
+			glDisable(GL_BLEND);
 
 			if (global_position)
 			{
@@ -247,37 +274,7 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 				shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
 				shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
 				shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
-				mesh->render(GL_TRIANGLES);
-			}
-			else 
-			{
-				for (int i = 0; i < lights.size(); i++)
-				{
-					LightEntity* light = lights[i];
-
-					if (light->light_type == eLightType::SPOT || light->light_type == eLightType::POINT) 
-						shader = GFX::Shader::Get("deferred_goemetry");
-					else 
-						shader = GFX::Shader::Get("deferred_light");
-
-					shader->enable();
-					shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
-					shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
-					shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
-					shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
-
-					glDisable(GL_DEPTH_TEST);
-					glEnable(GL_BLEND);
-					glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-				
-					shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
-					shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
-					lightToShader(light, shader);
-
-					mesh->render(GL_TRIANGLES);
-				}
-
-				glDisable(GL_BLEND);
+				quad->render(GL_TRIANGLES);
 			}
 
 			//call for alpha objects
@@ -323,16 +320,16 @@ void Renderer::renderForward(SCN::Scene* scene, Camera* camera)
 	if (skybox_cubemap && shader_mode != eShaderMode::FLAT)	renderSkybox(skybox_cubemap);
 
 	//render entities (first opaques)
-	for (int i = 0; i < render_calls_alpha.size(); ++i)
+	for (int i = 0; i < render_calls.size(); ++i)
 	{
-		RenderCall rc = render_calls_alpha[i];
+		RenderCall rc = render_calls[i];
 		renderNode(rc.model, rc.mesh, rc.material, camera);
 	}
 
 	//render entities
-	for (int i = 0; i < render_calls.size(); ++i)
+	for (int i = 0; i < render_calls_alpha.size(); ++i)
 	{
-		RenderCall rc = render_calls[i];
+		RenderCall rc = render_calls_alpha[i];
 		renderNode(rc.model, rc.mesh, rc.material, camera);
 	}
 }
@@ -389,7 +386,8 @@ void Renderer::orderRender(SCN::Node* node, Camera* camera)
 			rc.camera_distance = camera->eye.distance(node_pos);
 
 			//material to the appropriate render call if it has alpha or not
-			rc.material->alpha_mode == eAlphaMode::NO_ALPHA ? render_calls_alpha.push_back(rc) : render_calls.push_back(rc);
+			if (rc.material->alpha_mode == eAlphaMode::NO_ALPHA) render_calls.push_back(rc);
+			else render_calls_alpha.push_back(rc);
 		}
 	}
 
@@ -631,7 +629,6 @@ void Renderer::renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh
 	}
 	else
 	{
-
 		for (int i = 0; i < lights.size(); i++)
 		{
 			LightEntity* light = lights[i];	
@@ -687,7 +684,7 @@ void Renderer::renderMeshWithMaterialGBuffers(Matrix44 model, GFX::Mesh* mesh, S
 
 	if (albedo_texture == NULL) albedo_texture = white; //a 1x1 white texture
 
-	else glDisable(GL_BLEND);
+	glDisable(GL_BLEND);
 
 	//select if render both sides of the triangles
 	if (material->two_sided) glDisable(GL_CULL_FACE);
@@ -753,6 +750,7 @@ void SCN::Renderer::lightToShader(LightEntity* light, GFX::Shader* shader)
 
 	if (light->light_type == eLightType::SPOT || light->light_type == eLightType::DIRECTIONAL)
 		shader->setUniform("u_light_front", light->root.model.rotateVector(vec3(0, 0, 1)));
+	
 
 	if (light->light_type == eLightType::SPOT)
 		shader->setUniform("u_light_cone", vec2(cos(light->cone_info.x * DEG2RAD), cos(light->cone_info.y * DEG2RAD))); //cone for the spot light
@@ -801,7 +799,7 @@ void Renderer::showUI()
 		ImGui::SliderFloat("lum_white2", &lum_white2, 0, 2);
 		ImGui::SliderFloat("gamma", &gamma, 0, 2);
 
-		if (show_ssao) ImGui::SliderFloat("SSAO sphere radius", &ssao_radius, 0, 50);
+		if (show_ssao) ImGui::SliderFloat("SSAO radius", &ssao_radius, 0, 50);
 	}	
 }
 

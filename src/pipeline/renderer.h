@@ -54,7 +54,6 @@ namespace SCN {
 		bool dithering;
 		bool global_position;
 		bool show_ssao;
-		bool reset_tonemapper;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
