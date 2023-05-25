@@ -902,11 +902,11 @@ std::vector<vec3> generateSpherePoints(int num,	float radius, bool hemi)
 	for (int i = 0; i < num; i += 1)
 	{
 		vec3& p = points[i];
-		float u = random();
-		float v = random();
+		float u = random(1.0);
+		float v = random(1.0);
 		float theta = u * 2.0 * PI;
 		float phi = acos(2.0 * v - 1.0);
-		float r = cbrt(random() * 0.9 + 0.1) * radius;
+		float r = cbrt(random(1.0) * 0.9 + 0.1) * radius;
 		float sinTheta = sin(theta);
 		float cosTheta = cos(theta);
 		float sinPhi = sin(phi);
