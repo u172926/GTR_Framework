@@ -3,6 +3,8 @@
 #include "prefab.h"
 
 #include "light.h"
+#include "../gfx/sphericalharmonics.h"
+
 
 //forward declarations
 class Camera;
@@ -13,6 +15,13 @@ namespace GFX {
 	class Mesh;
 	class FBO;
 }
+
+struct sProbe{
+	vec3 pos;
+	vec3 local;
+	int index;
+	SphericalHarmonics sh;
+};
 
 namespace SCN {
 
@@ -109,6 +118,9 @@ namespace SCN {
 		void renderMeshWithMaterialFlat(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 		void renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
 		void renderMeshWithMaterialGBuffers(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
+
+		void captureProbe(sProbe& probe);
+		void renderProbe(sProbe& probe);
 
 		void showUI();
 

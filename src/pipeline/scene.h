@@ -131,6 +131,7 @@ namespace SCN {
 
 		Vector3f background_color;
 		Vector3f ambient_light;
+		float skybox_intensity;
 		std::string skybox_filename;
 		Camera main_camera;
 

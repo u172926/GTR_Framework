@@ -230,40 +230,6 @@ void main()
 
 
 
-\tonemapper.fs
-
-#version 330 core
-
-in vec2 v_uv;
-
-uniform sampler2D u_texture;
-
-uniform float u_scale; //color scale before tonemapper
-uniform float u_average_lum; 
-uniform float u_lumwhite2;
-uniform float u_igamma; //inverse gamma
-
-out vec4 FragColor;
-
-void main() {
-	vec4 color = texture2D( u_texture, v_uv );
-	vec3 rgb = color.xyz;
-
-	float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-	float L = (u_scale / u_average_lum) * lum;
-	float Ld = (L * (1.0 + L / u_lumwhite2)) / (1.0 + L);
-
-	rgb = (rgb / lum) * Ld;
-	rgb = max(rgb,vec3(0.001));
-	rgb = pow( rgb, vec3( u_igamma ) );
-	FragColor = vec4( rgb, color.a );
-}
-
-
-
-
-
-
 
 \light.fs
 
@@ -352,7 +318,6 @@ in vec3 v_normal;
 in vec2 v_uv;
 in vec4 v_color;
 
-
 uniform vec4 u_albedo_factor;
 uniform vec3 u_emissive_factor;
 uniform float u_metallic_factor;
@@ -389,12 +354,7 @@ void main()
 	//metallicness *= u_metallic_factor;
 
 	vec3 normal_map = texture(u_normal_texture, v_uv).rgb;
-	normal_map = normalize(normal_map * 2.0 - vec3(1.0));
-
-	vec3 metallic = texture(u_metallic_texture, v_uv).xyz;
-	float occlusion = metallic.r;
-	float roughness = metallic.g * u_roughness_factor;
-	float metallicness = metallic.b * u_metallic_factor;
+	normal_map = normalize(normal_map * 2.0 - 1.0);
 
 	vec3 WP = v_world_position;
 	vec3 N = normalize(v_normal);

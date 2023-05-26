@@ -25,6 +25,8 @@ bool SCN::BaseEntity::testRay(const Ray& ray, Vector3f& coll, float max_dist )
 SCN::Scene::Scene()
 {
 	instance = this;
+	skybox_intensity = 1.0;
+	
 }
 
 void SCN::Scene::clear()

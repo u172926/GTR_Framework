@@ -8,6 +8,7 @@
 #include "../gfx/mesh.h"
 #include "../gfx/texture.h"
 #include "../gfx/fbo.h"
+#include "../gfx/sphericalharmonics.h"
 #include "../pipeline/prefab.h"
 #include "../pipeline/material.h"
 #include "../pipeline/animation.h"
@@ -22,6 +23,11 @@ using namespace SCN;
 
 //some globals
 GFX::Mesh sphere;
+
+GFX::FBO* irr_fbo = nullptr;
+
+sProbe probe;
+
 
 Renderer::Renderer(const char* shader_atlas_filename)
 {
@@ -307,6 +313,8 @@ void Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		if (show_ssao) ssao_fbo->color_textures[0]->toViewport();
 
 	}
+
+	
 }
 
 void Renderer::renderForward(SCN::Scene* scene, Camera* camera)
@@ -342,7 +350,7 @@ void Renderer::renderForward(SCN::Scene* scene, Camera* camera)
 	}
 }
 
-void Renderer::renderSkybox(GFX::Texture* cubemap)
+void Renderer::renderSkybox(GFX::Texture* cubemap, float intensity)
 {
 	Camera* camera = Camera::current;
 
@@ -363,6 +371,7 @@ void Renderer::renderSkybox(GFX::Texture* cubemap)
 	shader->setUniform("u_model", m);
 	cameraToShader(camera, shader);
 	shader->setUniform("u_texture", cubemap, 0);
+	shader->setUniform("u_skybox_intensity", intensity);
 	sphere.render(GL_TRIANGLES);
 	shader->disable();
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -671,6 +680,59 @@ void Renderer::renderMeshWithMaterialLight(const Matrix44 model, GFX::Mesh* mesh
 	glDepthFunc(GL_LESS);
 }
 
+void Renderer::captureProbe(sProbe& probe){
+
+	FloatImage images[6]; //here we will store the six views
+
+	Camera cam;
+	cam.setPerspective(90, 1, 0.1, 1000);
+
+	if (!irr_fbo){
+		irr_fbo = new GFX::FBO();
+		irr_fbo->create(64, 64, 1, GL_RGB, GL_FLOAT);
+	}
+
+	for (int i = 0; i < 6; ++i) //for every cubemap face
+	{
+		//compute camera orientation using defined vectors
+		vec3 eye = probe.pos;
+		vec3 front = cubemapFaceNormals[i][2];
+		vec3 center = probe.pos + front;
+		vec3 up = cubemapFaceNormals[i][1];
+		cam.lookAt(eye, center, up);
+		cam.enable();
+
+		//render the scene from this point of view
+		irr_fbo->bind();
+		renderForward( scene, &cam );
+		irr_fbo->unbind();
+
+		//read the pixels back and store in a FloatImage
+		images[i].fromTexture( irr_fbo->color_textures[0] );
+	}
+
+	//compute the coefficients given the six images
+	probe.sh = computeSH(images);
+}
+
+void Renderer::renderProbe(sProbe& probe){
+	
+	Camera* camera = Camera::current;
+	GFX::Shader* shader = GFX::Shader::Get("spherical_probe");
+	shader->enable();
+
+	Matrix44 model;
+	model.setTranslation(probe.pos.x, probe.pos.y, probe.pos.z);
+	model.scale(20, 20, 20);
+
+	shader->setUniform("u_model", model);
+	cameraToShader(camera, shader);
+
+	sphere.render(GL_TRIANGLES);
+
+}
+
+
 //renders a mesh given its transform and material with gbffers
 void Renderer::renderMeshWithMaterialGBuffers(Matrix44 model, GFX::Mesh* mesh, SCN::Material* material)
 {
@@ -744,13 +806,13 @@ void Renderer::renderMeshWithMaterialGBuffers(Matrix44 model, GFX::Mesh* mesh, S
 
 
 
-void SCN::Renderer::cameraToShader(Camera* camera, GFX::Shader* shader)
+void Renderer::cameraToShader(Camera* camera, GFX::Shader* shader)
 {
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
 	shader->setUniform("u_camera_position", camera->eye);
 }
 
-void SCN::Renderer::lightToShader(LightEntity* light, GFX::Shader* shader)
+void Renderer::lightToShader(LightEntity* light, GFX::Shader* shader)
 {
 	shader->setUniform("u_light_position", light->root.model.getTranslation()); //for point and spot
 	shader->setUniform("u_light_color", light->color * light->intensity);
@@ -807,6 +869,10 @@ void Renderer::showUI()
 		ImGui::SliderFloat("gamma", &gamma, 0, 2);
 
 		if (show_ssao) ImGui::SliderFloat("SSAO radius", &ssao_radius, 0, 50);
+	}
+
+	if (ImGui::Button("Update Probes")){
+		captureProbe(probe);
 	}	
 }
 
