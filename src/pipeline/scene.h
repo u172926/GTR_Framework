@@ -134,6 +134,8 @@ namespace SCN {
 		std::string skybox_filename;
 		Camera main_camera;
 
+		float skybox_intensity;
+
 		Scene();
 
 		std::string filename;

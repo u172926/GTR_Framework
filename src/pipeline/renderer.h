@@ -1,8 +1,9 @@
 #pragma once
 #include "scene.h"
 #include "prefab.h"
-
 #include "light.h"
+#include "../gfx/sphericalharmonics.h"
+
 
 //forward declarations
 class Camera;
@@ -13,6 +14,13 @@ namespace GFX {
 	class Mesh;
 	class FBO;
 }
+
+struct sProbe {
+	vec3 pos; //where is located
+	vec3 local; //its ijk pos in the matrix
+	int index; //its index in the linear array
+	SphericalHarmonics sh; //coeffs
+};
 
 namespace SCN {
 
@@ -54,6 +62,8 @@ namespace SCN {
 		bool dithering;
 		bool global_position;
 		bool show_ssao;
+		bool show_probes;
+		bool show_irradiance;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
@@ -64,6 +74,7 @@ namespace SCN {
 		float gamma;
 
 		GFX::Texture* skybox_cubemap;
+		GFX::Texture* probes_texture;
 
 		SCN::Scene* scene;
 
@@ -76,9 +87,12 @@ namespace SCN {
 		std::vector<vec3> ssao_points;
 		float ssao_radius;
 
+		float irr_mulitplier;
+
 		GFX::FBO* gbuffer_fbo;
 		GFX::FBO* illumination_fbo;
 		GFX::FBO* ssao_fbo;
+		GFX::FBO* irr_fbo;
 
 		//updated every frame
 		Renderer(const char* shaders_atlas_filename);
@@ -98,8 +112,16 @@ namespace SCN {
 
 		void generateShadowMaps();
 
+		void captureProbe(sProbe& probe);
+		void renderProbe(sProbe& probe);
+
+		void captureIrradiance();
+		void loadIrradianceCache();
+		void uploadIrradianceCache();
+		void applyIrradiance();
+
 		//render the skybox
-		void renderSkybox(GFX::Texture* cubemap);
+		void renderSkybox(GFX::Texture* cubemap, float intensity);
 
 		//to render one node from the prefab and its children
 		void renderNode(Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera);
