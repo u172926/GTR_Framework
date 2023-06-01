@@ -49,6 +49,18 @@ namespace SCN {
 		float camera_distance;
 	};
 
+	struct sIrradianceCahceInfo {
+		int num_probes;
+		vec3 dims;
+		vec3 start;
+		vec3 end;
+	};
+
+	struct sReflectionProbe {
+		vec3 pos;
+		GFX::Texture* texture = nullptr;
+	};
+
 	// This class is in charge of rendering anything in our system.
 	// Separating the render from anything else makes the code cleaner
 	class Renderer
@@ -59,11 +71,12 @@ namespace SCN {
 		bool show_shadowmaps;
 		bool show_gbuffers;
 		bool shadowmap_on;
-		bool dithering;
-		bool global_position;
+		bool show_tonemapper;
+		bool show_global_position;
 		bool show_ssao;
 		bool show_probes;
 		bool show_irradiance;
+		bool show_ref_probes;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
@@ -87,12 +100,18 @@ namespace SCN {
 		std::vector<vec3> ssao_points;
 		float ssao_radius;
 
+		sIrradianceCahceInfo irradiance_cache_info;
+		std::vector<sProbe> probes;
 		float irr_mulitplier;
+
+		sReflectionProbe ref_probes;
 
 		GFX::FBO* gbuffer_fbo;
 		GFX::FBO* illumination_fbo;
 		GFX::FBO* ssao_fbo;
 		GFX::FBO* irr_fbo;
+		GFX::FBO* ref_fbo;
+		GFX::FBO* plane_ref_fbo;
 
 		//updated every frame
 		Renderer(const char* shaders_atlas_filename);
@@ -103,6 +122,7 @@ namespace SCN {
 		//add here your functions
 		//...
 		void orderRender(SCN::Node* node, Camera* camera);
+		void renderObjects(Camera* camera);
 
 		//renders several elements of the scene
 		void renderScene(SCN::Scene* scene, Camera* camera);
@@ -120,6 +140,9 @@ namespace SCN {
 		void uploadIrradianceCache();
 		void applyIrradiance();
 
+		void captureReflection(SCN::Scene* scene, sReflectionProbe& probe);
+		void rendereReflectionProbe(sReflectionProbe& probe);
+		void renderPlanarReflection(SCN::Scene* scene, Camera* camera);
 		//render the skybox
 		void renderSkybox(GFX::Texture* cubemap, float intensity);
 

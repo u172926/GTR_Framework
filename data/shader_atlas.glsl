@@ -17,6 +17,7 @@ tonemapper quad.vs tonemapper.fs
 ssao quad.vs ssao.fs
 spherical_probe basic.vs spherical_probe.fs
 irradiance quad.vs irradiance.fs
+reflection_probe basic.vs reflection_probe.fs
 
 
 
@@ -294,7 +295,7 @@ void main()
 
 	light += compute_light(u_light_info, normal, u_light_color, u_light_position, u_light_front, u_light_cone, v_world_position);
 	
-	if (metallicness != 0.0) light += specular_phong(N, L, V, WP, roughness, metallicness, P) * u_light_color;	
+	 if(metallicness != 0.0 && metallicness < 0.1) light += specular_phong(N, L, V, WP, roughness, metallicness, P) * u_light_color;	
 	
 	light *= shadow_factor;
 
@@ -376,7 +377,7 @@ void main()
 
 	light += compute_light(u_light_info, normal, u_light_color, u_light_position, u_light_front, u_light_cone, v_world_position) * diffuseColor;
 	
-    if(metallicness != 0.0) light += specular_phong_pbr(normal, L, V, WP, roughness, f0, u_light_position) * u_light_color;
+    if(metallicness != 0.0 && metallicness < 0.1) light += specular_phong_pbr(normal, L, V, WP, roughness, f0, u_light_position) * u_light_color;
 	
 	light *= shadow_factor;
 
@@ -454,7 +455,7 @@ void main()
 
 	vec3 color = albedo.rgb * light; 
 
-	FragColor = vec4(color, albedo.a);
+	FragColor = vec4(color, 1.0);
 	gl_FragDepth = depth;
 }
 
@@ -742,6 +743,33 @@ void main()
 	FragColor = color;
 }
 
+
+
+
+
+\reflection_probe.fs
+
+#version 330 core
+
+in vec3 v_position;
+in vec3 v_world_position;
+in vec3 v_normal;
+
+uniform samplerCube u_texture;
+uniform vec3 u_camera_position;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec3 E = v_world_position - u_camera_position; //normalize?
+	vec3 N = normalize(v_normal);
+	vec3 R = reflect(E, N);
+
+	vec4 color = texture(u_texture, R, 0.0);
+
+	FragColor = color;
+}
 
 
 
