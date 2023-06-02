@@ -431,18 +431,18 @@ void main()
 	vec4 world_pos_proj = u_ivp * screen_pos;
 	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
 
-	vec3 light = vec3(0.0);
-
 	vec3 normal_map = texture(u_normal_texture, uv).rgb;
 	normal_map = normalize(normal_map * 2.0 - vec3(1.0));
-
-	float roughness = texture(u_metallic_texture, uv).g * 0.2;
-	float metallicness = texture(u_metallic_texture, uv).b * 0.2;
 
 	vec3 N = normalize(v_normal);
 	vec3 V = normalize(u_camera_position - world_pos); 
 	vec3 L = u_light_front;
 	vec3 P = u_light_position;
+
+	float roughness = texture(u_metallic_texture, uv).g * 0.2;
+	float metallicness = texture(u_metallic_texture, uv).b * 0.2;
+
+	vec3 light = vec3(0.0);
 
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0) shadow_factor = testShadow(world_pos);
@@ -451,12 +451,13 @@ void main()
 	
 	if(metallicness != 0.0) light += specular_phong(N, L, V, world_pos, roughness, metallicness, P) * u_light_color;	
 	
-	light *= shadow_factor;
+	//light *= shadow_factor;
+	
+	vec4 color = vec4(1.0);
+	color.xyz = light * albedo.xyz;
 
-	vec3 color = albedo.rgb * light; 
-
-	FragColor = vec4(color, 1.0);
-	gl_FragDepth = depth;
+	FragColor = color;
+	//gl_FragDepth = depth;
 }
 
 

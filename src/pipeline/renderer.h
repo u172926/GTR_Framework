@@ -91,6 +91,9 @@ namespace SCN {
 
 		SCN::Scene* scene;
 
+		GFX::Mesh sphere;
+		GFX::Mesh* quad;
+
 		//vector of all the lights of the scene
 		std::vector<LightEntity*> lights;
 		std::vector<LightEntity*> visible_lights;
