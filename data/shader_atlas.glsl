@@ -447,17 +447,18 @@ void main()
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0) shadow_factor = testShadow(world_pos);
 
+
 	light += compute_light(u_light_info, normal_map, u_light_color, u_light_position, u_light_front, u_light_cone, world_pos);
 	
 	if(metallicness != 0.0) light += specular_phong(N, L, V, world_pos, roughness, metallicness, P) * u_light_color;	
 	
-	//light *= shadow_factor;
+	light *= shadow_factor;
 	
 	vec4 color = vec4(1.0);
 	color.xyz = light * albedo.xyz;
 
 	FragColor = color;
-	//gl_FragDepth = depth;
+	gl_FragDepth = depth;
 }
 
 
@@ -522,7 +523,7 @@ void main()
 
 	if(metallicness != 0.0) light += specular_phong(N, L, V, world_pos, roughness, metallicness, P) * u_light_color;	
 
-	light *= shadow_factor;
+	//light *= shadow_factor;
 
 	vec3 color = albedo.rgb * light; 
 
