@@ -1,7 +1,6 @@
 #pragma once
 #include "scene.h"
 #include "prefab.h"
-
 #include "light.h"
 #include "../gfx/sphericalharmonics.h"
 
@@ -16,11 +15,11 @@ namespace GFX {
 	class FBO;
 }
 
-struct sProbe{
-	vec3 pos;
-	vec3 local;
-	int index;
-	SphericalHarmonics sh;
+struct sProbe {
+	vec3 pos; //where is located
+	vec3 local; //its ijk pos in the matrix
+	int index; //its index in the linear array
+	SphericalHarmonics sh; //coeffs
 };
 
 namespace SCN {
@@ -50,6 +49,18 @@ namespace SCN {
 		float camera_distance;
 	};
 
+	struct sIrradianceCahceInfo {
+		int num_probes;
+		vec3 dims;
+		vec3 start;
+		vec3 end;
+	};
+
+	struct sReflectionProbe {
+		vec3 pos;
+		GFX::Texture* texture = nullptr;
+	};
+
 	// This class is in charge of rendering anything in our system.
 	// Separating the render from anything else makes the code cleaner
 	class Renderer
@@ -60,9 +71,12 @@ namespace SCN {
 		bool show_shadowmaps;
 		bool show_gbuffers;
 		bool shadowmap_on;
-		bool dithering;
-		bool global_position;
+		bool show_tonemapper;
+		bool show_global_position;
 		bool show_ssao;
+		bool show_probes;
+		bool show_irradiance;
+		bool show_ref_probes;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
@@ -73,8 +87,12 @@ namespace SCN {
 		float gamma;
 
 		GFX::Texture* skybox_cubemap;
+		GFX::Texture* probes_texture;
 
 		SCN::Scene* scene;
+
+		GFX::Mesh sphere;
+		GFX::Mesh* quad;
 
 		//vector of all the lights of the scene
 		std::vector<LightEntity*> lights;
@@ -85,9 +103,18 @@ namespace SCN {
 		std::vector<vec3> ssao_points;
 		float ssao_radius;
 
+		sIrradianceCahceInfo irradiance_cache_info;
+		std::vector<sProbe> probes;
+		float irr_mulitplier;
+
+		sReflectionProbe ref_probes;
+
 		GFX::FBO* gbuffer_fbo;
 		GFX::FBO* illumination_fbo;
 		GFX::FBO* ssao_fbo;
+		GFX::FBO* irr_fbo;
+		GFX::FBO* ref_fbo;
+		GFX::FBO* plane_ref_fbo;
 
 		//updated every frame
 		Renderer(const char* shaders_atlas_filename);
@@ -98,6 +125,7 @@ namespace SCN {
 		//add here your functions
 		//...
 		void orderRender(SCN::Node* node, Camera* camera);
+		void renderObjects(Camera* camera);
 
 		//renders several elements of the scene
 		void renderScene(SCN::Scene* scene, Camera* camera);
@@ -107,8 +135,19 @@ namespace SCN {
 
 		void generateShadowMaps();
 
+		void captureProbe(sProbe& probe);
+		void renderProbe(sProbe& probe);
+
+		void captureIrradiance();
+		void loadIrradianceCache();
+		void uploadIrradianceCache();
+		void applyIrradiance();
+
+		void captureReflection(SCN::Scene* scene, sReflectionProbe& probe);
+		void rendereReflectionProbe(sReflectionProbe& probe);
+		void renderPlanarReflection(SCN::Scene* scene, Camera* camera);
 		//render the skybox
-		void renderSkybox(GFX::Texture* cubemap);
+		void renderSkybox(GFX::Texture* cubemap, float intensity);
 
 		//to render one node from the prefab and its children
 		void renderNode(Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera);
