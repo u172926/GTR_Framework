@@ -77,6 +77,7 @@ namespace SCN {
 		bool show_probes;
 		bool show_irradiance;
 		bool show_ref_probes;
+		bool show_volumetric;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
@@ -93,12 +94,14 @@ namespace SCN {
 
 		GFX::Mesh sphere;
 		GFX::Mesh* quad;
+		GFX::Mesh cube;
 
 		//vector of all the lights of the scene
 		std::vector<LightEntity*> lights;
 		std::vector<LightEntity*> visible_lights;
 		std::vector<RenderCall> render_calls;
 		std::vector<RenderCall> render_calls_alpha;
+		std::vector<DecalEntity*> decals;
 		
 		std::vector<vec3> ssao_points;
 		float ssao_radius;
@@ -109,12 +112,16 @@ namespace SCN {
 
 		sReflectionProbe ref_probes;
 
+		float air_density;
+
 		GFX::FBO* gbuffer_fbo;
 		GFX::FBO* illumination_fbo;
 		GFX::FBO* ssao_fbo;
 		GFX::FBO* irr_fbo;
 		GFX::FBO* ref_fbo;
 		GFX::FBO* plane_ref_fbo;
+		GFX::FBO* volumetric_fbo;
+		GFX::Texture* clone_depth_buffer;
 
 		//updated every frame
 		Renderer(const char* shaders_atlas_filename);
@@ -125,11 +132,11 @@ namespace SCN {
 		//add here your functions
 		//...
 		void orderRender(SCN::Node* node, Camera* camera);
-		void renderObjects(Camera* camera);
+		void renderObjects(Camera* camera, eRenderMode mode);
 
 		//renders several elements of the scene
 		void renderScene(SCN::Scene* scene, Camera* camera);
-		void renderForward(SCN::Scene* scene, Camera* camera);
+		void renderForward(SCN::Scene* scene, Camera* camera, eRenderMode mode);
 		void renderDeferred(SCN::Scene* scene, Camera* camera);
 		void renderFrame(SCN::Scene* scene, Camera* camera);
 
@@ -143,14 +150,19 @@ namespace SCN {
 		void uploadIrradianceCache();
 		void applyIrradiance();
 
+		void showProbes();
+
 		void captureReflection(SCN::Scene* scene, sReflectionProbe& probe);
 		void rendereReflectionProbe(sReflectionProbe& probe);
 		void renderPlanarReflection(SCN::Scene* scene, Camera* camera);
+
+		void renderVolumetric(SCN::Scene* scene, Camera* camera);
+
 		//render the skybox
 		void renderSkybox(GFX::Texture* cubemap, float intensity);
 
 		//to render one node from the prefab and its children
-		void renderNode(Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera);
+		void renderNode(Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, Camera* camera, eRenderMode mode);
 		
 		//to render one mesh given its material and transformation matrix
 		void renderMeshWithMaterial(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);

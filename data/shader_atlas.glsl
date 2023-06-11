@@ -18,8 +18,9 @@ ssao quad.vs ssao.fs
 spherical_probe basic.vs spherical_probe.fs
 irradiance quad.vs irradiance.fs
 reflection_probe basic.vs reflection_probe.fs
+volumetric quad.vs volumetric.fs
 
-
+decals basic.vs decals.fs
 
 \basic.vs
 
@@ -447,7 +448,6 @@ void main()
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0) shadow_factor = testShadow(world_pos);
 
-
 	light += compute_light(u_light_info, normal_map, u_light_color, u_light_position, u_light_front, u_light_cone, world_pos);
 	
 	if(metallicness != 0.0) light += specular_phong(N, L, V, world_pos, roughness, metallicness, P) * u_light_color;	
@@ -584,8 +584,7 @@ uniform vec3 u_ambient_light;
 out vec4 FragColor;
 
 void main()
-{	
-
+{
 	float depth = texture(u_depth_texture, v_uv).x;
 	if (depth == 1.0) discard;
 
@@ -872,7 +871,6 @@ void main()
 
 
 
-
 	SH9Color sh;
 	
 	//fill the coefficients
@@ -884,9 +882,157 @@ void main()
 	}
 	
 	vec3 irradiance = max(vec3(0.0), ComputeSHIrradiance( normal_map, sh ) * u_irr_multiplier);
+	irradiance *= albedo.xyz;
 
-	FragColor = vec4(irradiance, 1.0); //*albedo
+	FragColor = vec4(irradiance, 1.0); 
 }
+
+
+
+
+
+
+\volumetric.fs
+
+#version 330 core
+
+uniform sampler2D u_depth_texture;
+
+uniform mat4 u_viewprojection;
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+uniform vec3 u_camera_position;
+uniform float u_air_density;
+
+uniform float u_rand;
+uniform float u_time;
+
+#define SAMPLES 64
+
+#include "lights"
+
+layout(location = 0) out vec4 FragColor;
+
+float rand(vec2 co)
+{
+    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+		
+	float depth = texture(u_depth_texture, uv).r;
+
+	// if(depth < 1.0)	//skip skybox pixels
+	
+	vec4 screen_coord = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_proj = u_ivp * screen_coord;
+	vec3 world_pos = world_proj.xyz / world_proj.w;
+
+	vec3 ray_start = u_camera_position;
+	vec3 ray_direction = world_pos - ray_start;
+	float ray_lenght = length(ray_direction);
+
+	ray_direction /= ray_lenght;
+	ray_direction = normalize(ray_direction);
+	ray_lenght = min(500.0, ray_lenght);
+	float step_dist = ray_lenght / float(SAMPLES);
+
+	ray_start += ray_direction * rand(uv + vec2(u_rand, u_time)) * step_dist;
+
+	vec3 current_pos = ray_start;
+	vec3 ray_offset = ray_direction * step_dist;
+
+	vec3 volumetric = vec3(0.0);
+	float transparency = 1.0;
+	float air_step = u_air_density * step_dist / 10;
+
+	for (int i = 0; i < SAMPLES; i++)
+	{
+		vec3 v = vec3(1.0);
+		vec3 light = vec3(0.0);
+		float shadow_factor = 1.0;
+		if (u_shadow_param.x != 0.0) shadow_factor = testShadow(current_pos);
+		
+		if (int(u_light_info.x) == DIRECTIONAL_LIGHT)
+		{
+			light += u_light_color;		
+		}
+		else if (int(u_light_info.x) == POINT_LIGHT || int(u_light_info.x) == SPOT_LIGHT)
+		{
+			vec3 L = u_light_position - current_pos;
+			float dist = length(L);
+			L /= dist; //to normalize L
+		
+			float attenuation = max(0.0, (u_light_info.z - dist) / u_light_info.z);
+		
+			if (int(u_light_info.x) == SPOT_LIGHT)
+			{
+				float cos_angle = dot(u_light_front, L);
+				if (cos_angle < u_light_cone.y) attenuation = 0.0;
+				else if (cos_angle < u_light_cone.x) attenuation *= 1.0 - (cos_angle - u_light_cone.x) / (u_light_cone.y - u_light_cone.x);
+			}
+			light = u_light_color * attenuation;
+		}
+
+		light *= shadow_factor;
+
+		volumetric += (u_ambient_light + light) * transparency * air_step;
+
+		current_pos.xyz += ray_offset;
+
+		transparency -= air_step;
+		if (transparency < 0.001) break;
+	}
+
+	FragColor = vec4(volumetric, 1.0 - clamp(transparency, 0.0, 1.0)); 
+	
+}
+
+
+
+
+
+
+\decals.fs
+
+#version 330 core
+
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+uniform mat4 u_imodel;
+
+uniform sampler2D u_depth_texture;
+uniform sampler2D u_color_texture;
+
+layout(location = 0) out vec4 FragColor;
+layout(location = 1) out vec4 NormalColor;
+layout(location = 2) out vec4 ExtraColor; //for now only emissive
+
+void main()
+{	
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	float depth = texture(u_depth_texture, uv).x;
+	if (depth == 1.0) discard;
+
+	vec4 screen_pos = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_pos_proj = u_ivp * screen_pos;
+	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
+
+	vec3 decal_space = (u_imodel * vec4(world_pos, 1.0)).xyz + vec3(0.5);
+	if (decal_space.x < -1.0 || decal_space.x > 1.0 ||
+		decal_space.y < -1.0 || decal_space.y > 1.0 ||
+		decal_space.z < -1.0 || decal_space.z > 1.0 ) discard;
+
+	vec2 decal_uv = decal_space.xy;
+	vec4 color = texture(u_color_texture, decal_uv);
+
+	FragColor = color;
+	ExtraColor = vec4(0.0);
+}
+
 
 
 
