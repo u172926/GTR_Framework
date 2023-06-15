@@ -110,7 +110,7 @@ namespace SCN {
 		std::vector<sProbe> probes;
 		float irr_mulitplier;
 
-		sReflectionProbe ref_probes;
+		std::vector<sReflectionProbe> ref_probes;
 
 		float air_density;
 
@@ -121,6 +121,7 @@ namespace SCN {
 		GFX::FBO* ref_fbo;
 		GFX::FBO* plane_ref_fbo;
 		GFX::FBO* volumetric_fbo;
+
 		GFX::Texture* clone_depth_buffer;
 
 		//updated every frame
@@ -152,7 +153,7 @@ namespace SCN {
 
 		void showProbes();
 
-		void captureReflection(SCN::Scene* scene, sReflectionProbe& probe);
+		void captureReflection(SCN::Scene* scene);
 		void rendereReflectionProbe(sReflectionProbe& probe);
 		void renderPlanarReflection(SCN::Scene* scene, Camera* camera);
 
