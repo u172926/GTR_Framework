@@ -171,6 +171,7 @@ void main() {
 
 
 
+
 \gbuffers.fs
 
 #version 330 core
@@ -231,6 +232,7 @@ void main()
 	NormalColor = vec4(normal*0.5 + vec3(0.5), 1.0);
 	ExtraColor = vec4(emissive, roughness);
 }
+
 
 
 
@@ -937,7 +939,6 @@ void main()
 #version 330 core
 
 uniform sampler2D u_albedo_texture;
-uniform sampler2D u_emissive_texture;
 uniform sampler2D u_normal_texture;
 uniform sampler2D u_depth_texture;
 uniform sampler2D u_probes_texture;
@@ -975,7 +976,6 @@ void SHCosineLobe(in vec3 dir, out SH9 sh) //SH9
 	sh.c[7] = 1.092548 * dir.x * dir.z * CosineA2;
 	sh.c[8] = 0.546274 * (dir.x * dir.x - dir.y * dir.y) * CosineA2;
 }
-
 vec3 ComputeSHIrradiance(in vec3 normal, in SH9Color sh)
 {
 	// Compute the cosine lobe in SH, oriented about the normal direction
@@ -995,8 +995,7 @@ void main()
 {
 	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
 
-	vec4 albedo = texture(u_albedo_texture, uv);	
-	vec4 emissive = texture(u_emissive_texture, uv);	
+	vec4 albedo = texture(u_albedo_texture, uv);		
 
 	float depth = texture(u_depth_texture, uv).x;
 	if (depth == 1.0) discard;
@@ -1039,7 +1038,7 @@ void main()
 	}
 	
 	vec3 irradiance = max(vec3(0.0), ComputeSHIrradiance( normal_map, sh ) * u_irr_multiplier);
-	irradiance *= albedo.xyz;
+	//irradiance *= albedo.xyz;
 
 	FragColor = vec4(irradiance, 1.0); 
 }

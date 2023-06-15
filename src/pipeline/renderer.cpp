@@ -1095,18 +1095,22 @@ void::SCN::Renderer::applyIrradiance()
 	Camera* camera = Camera::current;
 
 	glDisable(GL_DEPTH_TEST);
-	glEnable(GL_BLEND); //disabled just to see irradiance
+	glDisable(GL_BLEND); //disabled just to see irradiance
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
 	GFX::Shader* shader = GFX::Shader::Get("irradiance");
 
 	shader->enable();
+	shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
+	shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
+	shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
 	shader->setUniform("u_probes_texture", probes_texture, 4);
 
 	shader->setUniform("u_iRes", vec2(1.0 / gbuffer_fbo->width, 1.0 / gbuffer_fbo->height));
 	shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
+	cameraToShader(camera, shader);
 
-	vec3 delta = irradiance_cache_info.start - irradiance_cache_info.end;
+	vec3 delta = irradiance_cache_info.end - irradiance_cache_info.start;
 	delta.x /= (irradiance_cache_info.dims.x - 1);
 	delta.y /= (irradiance_cache_info.dims.y - 1);
 	delta.z /= (irradiance_cache_info.dims.z - 1);
