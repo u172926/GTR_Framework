@@ -36,6 +36,7 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 	show_irradiance = false;
 	show_ref_probes = false;
 	show_volumetric = false;
+	show_postFX = false;
 
 	ssao_points = generateSpherePoints(64, 1, false);
 	ssao_radius = 5.0;
@@ -52,9 +53,13 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 	plane_ref_fbo = nullptr;
 	volumetric_fbo = nullptr;
 	clone_depth_buffer = nullptr;
+	postFX_fbo_A = nullptr;
+	postFX_fbo_B = nullptr;
+	postFX_fbo_temp = nullptr;
 
 	probes_texture = nullptr;
 
+	brightness = 1.0;
 	tonemapper_scale = 1.0;
 	average_lum = 1.0;
 	lum_white2 = 1.0;
@@ -213,9 +218,11 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 	
 			for (auto decal : decals)
 			{
+				if (!decal->filename.size()) continue;
+
 				mat4 imodel = decal->root.model;
 				imodel.inverse();
-				GFX::Texture* decal_texture = decal->filename.size() == 0 ? GFX::Texture::getWhiteTexture() : GFX::Texture::Get((std::string("data/") + decal->filename).c_str());
+				GFX::Texture* decal_texture = GFX::Texture::Get((std::string("data/") + decal->filename).c_str());
 				shader->setTexture("u_color_texture", decal_texture, 5);
 				shader->setUniform("u_model", decal->root.model);
 				shader->setUniform("u_imodel", imodel);
@@ -248,7 +255,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
 		shader->setTexture("u_emissive_texture", gbuffer_fbo->color_textures[2], 2);
 		shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
-		shader->setUniform("u_ambient_light", scene->ambient_light);
+		shader->setUniform("u_ambient_light", show_irradiance ? 0.0 : scene->ambient_light);
 
 		quad->render(GL_TRIANGLES);
 
@@ -428,26 +435,33 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		quad->render(GL_TRIANGLES);
 	}
 	if (show_ssao) ssao_fbo->color_textures[0]->toViewport();	
-
 	if (show_tonemapper)
 	{
 		shader = GFX::Shader::Get("tonemapper");
+
 		shader->enable();
 		shader->setUniform("u_scale", tonemapper_scale);
 		shader->setUniform("u_average_lum", average_lum);
 		shader->setUniform("u_lumwhite2", lum_white2);
 		shader->setUniform("u_igamma", 1.0f / gamma);
+		shader->setUniform("u_brightness", brightness);
 
 		illumination_fbo->color_textures[0]->toViewport(shader);
 	}
 	if (show_volumetric)
+		{
+			glEnable(GL_BLEND);
+			glDisable(GL_DEPTH_TEST);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			volumetric_fbo->color_textures[0]->toViewport();
+			glDisable(GL_BLEND);
+		}
+
+	if (show_postFX)
 	{
-		glEnable(GL_BLEND);
-		glDisable(GL_DEPTH_TEST);
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		volumetric_fbo->color_textures[0]->toViewport();
-		glDisable(GL_BLEND);
+		renderPostFX(illumination_fbo->color_textures[0], gbuffer_fbo->depth_texture, camera);
 	}
+	
 }
 
 void SCN::Renderer::renderForward(SCN::Scene* scene, Camera* camera, eRenderMode mode)
@@ -1095,7 +1109,7 @@ void::SCN::Renderer::applyIrradiance()
 	Camera* camera = Camera::current;
 
 	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_BLEND); //disabled just to see irradiance
+	glEnable(GL_BLEND); //disabled just to see irradiance
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
 	GFX::Shader* shader = GFX::Shader::Get("irradiance");
@@ -1238,10 +1252,90 @@ void SCN::Renderer::renderPlanarReflection(SCN::Scene* scene, Camera* camera)
 }
 
 
-void SCN::Renderer::renderVolumetric(SCN::Scene* scene, Camera* camera)
+void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera)
 {
+	assert(color_buffer && depth_buffer);
+
+	GFX::Shader* shader = nullptr;
+	float width = color_buffer->width;
+	float height = color_buffer->height;
+
+	Matrix44 prev_viewprojection_matrix;
+
+	if (!postFX_fbo_A)
+	{
+		postFX_fbo_A = new GFX::FBO();
+		postFX_fbo_B = new GFX::FBO();
+		postFX_fbo_temp = new GFX::FBO();
+		postFX_fbo_A->create(width, height, 1, GL_RGB, GL_HALF_FLOAT);
+		postFX_fbo_B->create(width, height, 1, GL_RGB, GL_HALF_FLOAT);
+		postFX_fbo_temp->create(width, height, 1, GL_RGB, GL_HALF_FLOAT);
+	}
+
+	postFX_fbo_A->bind();
+		color_buffer->toViewport();
+	postFX_fbo_A->unbind();
+
+	//MOTION BLUR
+	shader = GFX::Shader::Get("motion_blur");
+	shader->enable();
+	shader->setUniform("u_iRes", vec2(1.0 / width, 1.0 / height));
+	shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
+	shader->setMatrix44("u_prev_vp", prev_viewprojection_matrix);
+	shader->setTexture("u_depth_texture", depth_buffer, 4);
+	postFX_fbo_B->bind();
+		postFX_fbo_A->color_textures[0]->toViewport(shader);
+	postFX_fbo_B->unbind();
+
+	std::swap(postFX_fbo_A, postFX_fbo_B);
+
+	prev_viewprojection_matrix = camera->viewprojection_matrix;
+
+	//save image
+	postFX_fbo_temp->bind();
+		postFX_fbo_A->color_textures[0]->toViewport(shader);
+	postFX_fbo_temp->unbind();
+	
+	//BLOOM
+	shader = GFX::Shader::Get("blur");
+	shader->enable();
+	shader->setUniform("u_intensity", 1.0f);
+	
+	int power = 1;
+	for (int i = 0; i < 4; i++)
+	{		
+	
+		shader->setUniform("u_offset", vec2(0.0f, (float)power / height));
+		shader->setUniform("u_texture", postFX_fbo_A->color_textures[0], 0);
+		postFX_fbo_B->bind();
+			quad->render(GL_TRIANGLES);
+		postFX_fbo_B->unbind();
+	
+		std::swap(postFX_fbo_A, postFX_fbo_B);
+	
+		shader->setUniform("u_offset", vec2((float)power / width, 0.0f));
+		shader->setUniform("u_texture", postFX_fbo_A->color_textures[0], 0);
+		postFX_fbo_B->bind();
+			quad->render(GL_TRIANGLES);
+		postFX_fbo_B->unbind();
+	
+		std::swap(postFX_fbo_A, postFX_fbo_B);
+	
+		power = power << 1;
+	}
+
+	postFX_fbo_A->bind();
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+		postFX_fbo_temp->color_textures[0]->toViewport();
+	postFX_fbo_A->unbind();
+	glDisable(GL_BLEND);
+
+	postFX_fbo_A->color_textures[0]->toViewport(shader);
 
 }
+
+
 
 
 #ifndef SKIP_IMGUI
@@ -1317,9 +1411,10 @@ void SCN::Renderer::showUI()
 			ImGui::SliderFloat("average_lum", &average_lum, 0, 2);
 			ImGui::SliderFloat("lum_white2", &lum_white2, 0, 2);
 			ImGui::SliderFloat("gamma", &gamma, 0, 2);
+			ImGui::SliderFloat("brightness", &brightness, 0, 2);
 		}
 
-
+		ImGui::Checkbox("show_postFX", &show_postFX);
 
 	}	
 }

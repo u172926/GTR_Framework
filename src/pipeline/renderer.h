@@ -78,10 +78,12 @@ namespace SCN {
 		bool show_irradiance;
 		bool show_ref_probes;
 		bool show_volumetric;
+		bool show_postFX;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
 
+		float brightness;
 		float tonemapper_scale;
 		float average_lum;
 		float lum_white2;
@@ -121,6 +123,10 @@ namespace SCN {
 		GFX::FBO* ref_fbo;
 		GFX::FBO* plane_ref_fbo;
 		GFX::FBO* volumetric_fbo;
+		GFX::FBO* postFX_fbo_A;
+		GFX::FBO* postFX_fbo_B;
+		GFX::FBO* postFX_fbo_temp;
+
 
 		GFX::Texture* clone_depth_buffer;
 
@@ -157,7 +163,7 @@ namespace SCN {
 		void rendereReflectionProbe(sReflectionProbe& probe);
 		void renderPlanarReflection(SCN::Scene* scene, Camera* camera);
 
-		void renderVolumetric(SCN::Scene* scene, Camera* camera);
+		void renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera);
 
 		//render the skybox
 		void renderSkybox(GFX::Texture* cubemap, float intensity);

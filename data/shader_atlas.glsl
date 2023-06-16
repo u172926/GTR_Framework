@@ -15,7 +15,6 @@ deferred_pbr quad.vs deferred_pbr.fs
 deferred_geometry basic.vs deferred_geometry.fs 
 deferred_geometry_pbr basic.vs deferred_geometry_pbr.fs 
 deferred_world_color quad.vs deferred_world_color.fs 
-tonemapper quad.vs tonemapper.fs
 
 //SHADERS FOR OTHER ELEMETS
 ssao quad.vs ssao.fs
@@ -24,6 +23,12 @@ irradiance quad.vs irradiance.fs
 reflection_probe basic.vs reflection_probe.fs
 volumetric quad.vs volumetric.fs
 decals basic.vs decals.fs
+
+//POST FX SHADERS
+blur quad.vs blur.fs
+motion_blur quad.vs motion_blur.fs
+tonemapper quad.vs tonemapper.fs
+
 
 \basic.vs
 
@@ -137,6 +142,90 @@ void main()
 
 
 
+
+\blur.fs
+
+#version 330 core
+
+uniform sampler2D u_texture; 
+in vec2 v_uv;
+
+uniform vec2 u_offset;
+uniform float u_intensity;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec4 sum = vec4(0.0);
+
+	sum += texture(u_texture, v_uv + u_offset * -4.0) * 0.05/0.98;
+	sum += texture(u_texture, v_uv + u_offset * -3.0) * 0.09/0.98;
+	sum += texture(u_texture, v_uv + u_offset * -2.0) * 0.12/0.98;
+	sum += texture(u_texture, v_uv + u_offset * -1.0) * 0.15/0.98;
+	sum += texture(u_texture, v_uv) * 0.05/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 1.0) * 0.15/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 2.0) * 0.12/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 3.0) * 0.09/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 4.0) * 0.05/0.98;
+
+	FragColor = sum * u_intensity;
+}
+
+
+
+
+
+
+\motion_blur.fs
+
+#version 330 core
+
+uniform sampler2D u_texture;
+uniform sampler2D u_depth_texture;
+in vec2 v_uv;
+
+uniform mat4 u_ivp;
+uniform mat4 u_prev_vp;
+uniform vec2 u_iRes;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;	
+
+	float depth = texture(u_depth_texture, uv).x;
+
+	vec4 screen_pos = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_pos_proj = u_ivp * screen_pos;
+	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
+
+	vec4 prev_screenpos = u_prev_vp * vec4(world_pos, 1.0);
+	prev_screenpos.xyz /= prev_screenpos.w;
+	vec2 prev_uv = prev_screenpos.xy * 0.5 + vec2(0.5);
+
+	vec4 color = vec4(0.0);
+
+	for (int i = 0; i < 16; i++)
+	{
+		vec2 int_uv = mix(uv, prev_uv, float(i)/16.0);
+		color += texture(u_texture, int_uv);
+	}
+	color /= 16.0f;
+
+	FragColor = color;
+}
+
+
+
+
+
+
+
+
+
+
 \tonemapper.fs
 
 #version 330 core
@@ -149,21 +238,24 @@ uniform float u_scale; //color scale before tonemapper
 uniform float u_average_lum; 
 uniform float u_lumwhite2;
 uniform float u_igamma; //inverse gamma
+uniform float u_brightness;
 
 out vec4 FragColor;
 
 void main() {
 	vec4 color = texture2D( u_albedo_texture, v_uv );
-	vec3 rgb = color.xyz;
 
-	float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+	float lum = dot(color.xyz, vec3(0.2126, 0.7152, 0.0722));
 	float L = (u_scale / u_average_lum) * lum;
 	float Ld = (L * (1.0 + L / u_lumwhite2)) / (1.0 + L);
 
-	rgb = (rgb / lum) * Ld;
-	rgb = max(rgb,vec3(0.001));
-	rgb = pow( rgb, vec3( u_igamma ) );
-	FragColor = vec4( rgb, color.a );
+	color.xyz = (color.xyz / lum) * Ld;
+	color.xyz = max(color.xyz,vec3(0.001));
+	color.xyz = pow( color.xyz, vec3( u_igamma ) );
+
+	color.xyz *= u_brightness;
+
+	FragColor = color;
 }
 
 
@@ -1038,7 +1130,7 @@ void main()
 	}
 	
 	vec3 irradiance = max(vec3(0.0), ComputeSHIrradiance( normal_map, sh ) * u_irr_multiplier);
-	//irradiance *= albedo.xyz;
+	irradiance *= albedo.xyz;
 
 	FragColor = vec4(irradiance, 1.0); 
 }
