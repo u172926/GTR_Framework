@@ -7,16 +7,27 @@ skybox basic.vs skybox.fs
 depth quad.vs depth.fs
 multi basic.vs multi.fs
 
+//SHADERS FOR DEFERRED
 gbuffers basic.vs gbuffers.fs
 deferred_global quad.vs deferred_global.fs
 deferred_light quad.vs deferred_light.fs 
+deferred_pbr quad.vs deferred_pbr.fs
 deferred_geometry basic.vs deferred_geometry.fs 
+deferred_geometry_pbr basic.vs deferred_geometry_pbr.fs 
 deferred_world_color quad.vs deferred_world_color.fs 
-tonemapper quad.vs tonemapper.fs
 
+//SHADERS FOR OTHER ELEMETS
 ssao quad.vs ssao.fs
+spherical_probe basic.vs spherical_probe.fs
+irradiance quad.vs irradiance.fs
+reflection_probe basic.vs reflection_probe.fs
+volumetric quad.vs volumetric.fs
+decals basic.vs decals.fs
 
-
+//POST FX SHADERS
+blur quad.vs blur.fs
+motion_blur quad.vs motion_blur.fs
+tonemapper quad.vs tonemapper.fs
 
 
 \basic.vs
@@ -131,6 +142,90 @@ void main()
 
 
 
+
+\blur.fs
+
+#version 330 core
+
+uniform sampler2D u_texture; 
+in vec2 v_uv;
+
+uniform vec2 u_offset;
+uniform float u_intensity;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec4 sum = vec4(0.0);
+
+	sum += texture(u_texture, v_uv + u_offset * -4.0) * 0.05/0.98;
+	sum += texture(u_texture, v_uv + u_offset * -3.0) * 0.09/0.98;
+	sum += texture(u_texture, v_uv + u_offset * -2.0) * 0.12/0.98;
+	sum += texture(u_texture, v_uv + u_offset * -1.0) * 0.15/0.98;
+	sum += texture(u_texture, v_uv) * 0.05/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 1.0) * 0.15/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 2.0) * 0.12/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 3.0) * 0.09/0.98;
+	sum += texture(u_texture, v_uv + u_offset * 4.0) * 0.05/0.98;
+
+	FragColor = sum * u_intensity;
+}
+
+
+
+
+
+
+\motion_blur.fs
+
+#version 330 core
+
+uniform sampler2D u_texture;
+uniform sampler2D u_depth_texture;
+in vec2 v_uv;
+
+uniform mat4 u_ivp;
+uniform mat4 u_prev_vp;
+uniform vec2 u_iRes;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;	
+
+	float depth = texture(u_depth_texture, uv).x;
+
+	vec4 screen_pos = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_pos_proj = u_ivp * screen_pos;
+	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
+
+	vec4 prev_screenpos = u_prev_vp * vec4(world_pos, 1.0);
+	prev_screenpos.xyz /= prev_screenpos.w;
+	vec2 prev_uv = prev_screenpos.xy * 0.5 + vec2(0.5);
+
+	vec4 color = vec4(0.0);
+
+	for (int i = 0; i < 16; i++)
+	{
+		vec2 int_uv = mix(uv, prev_uv, float(i)/16.0);
+		color += texture(u_texture, int_uv);
+	}
+	color /= 16.0f;
+
+	FragColor = color;
+}
+
+
+
+
+
+
+
+
+
+
 \tonemapper.fs
 
 #version 330 core
@@ -143,22 +238,26 @@ uniform float u_scale; //color scale before tonemapper
 uniform float u_average_lum; 
 uniform float u_lumwhite2;
 uniform float u_igamma; //inverse gamma
+uniform float u_brightness;
 
 out vec4 FragColor;
 
 void main() {
 	vec4 color = texture2D( u_albedo_texture, v_uv );
-	vec3 rgb = color.xyz;
 
-	float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+	float lum = dot(color.xyz, vec3(0.2126, 0.7152, 0.0722));
 	float L = (u_scale / u_average_lum) * lum;
 	float Ld = (L * (1.0 + L / u_lumwhite2)) / (1.0 + L);
 
-	rgb = (rgb / lum) * Ld;
-	rgb = max(rgb,vec3(0.001));
-	rgb = pow( rgb, vec3( u_igamma ) );
-	FragColor = vec4( rgb, color.a );
+	color.xyz = (color.xyz / lum) * Ld;
+	color.xyz = max(color.xyz,vec3(0.001));
+	color.xyz = pow( color.xyz, vec3( u_igamma ) );
+
+	color.xyz *= u_brightness;
+
+	FragColor = color;
 }
+
 
 
 
@@ -231,6 +330,7 @@ void main()
 
 
 
+
 \light.fs
 
 #version 330 core
@@ -291,10 +391,8 @@ void main()
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0 && u_light_info.x != NO_LIGHT) shadow_factor = testShadow(WP);
 
-	light += compute_light(u_light_info, normal, u_light_color, u_light_position, u_light_front, u_light_cone, v_world_position);
-	
-	if (metallicness != 0.0) light += specular_phong(N, L, V, WP, roughness, metallicness, P) * u_light_color;	
-	
+	light += compute_light(u_light_info, normal, u_light_color, P, L, u_light_cone, v_world_position);
+		
 	light *= shadow_factor;
 
 	light += u_ambient_light * occlusion;
@@ -364,6 +462,7 @@ void main()
 	vec3 normal = normalize(TBN * normal_map); //perturbed
 	vec3 L = u_light_front;
 	vec3 H = normalize(V + L);
+	vec3 P = u_light_position;
 
 	vec3 light = vec3(0.0);
 
@@ -373,9 +472,9 @@ void main()
 	vec3 f0 = mix( vec3(0.5), albedo.xyz, metallicness);
 	vec3 diffuseColor = (1.0 - metallicness) * albedo.xyz;
 
-	light += compute_light(u_light_info, normal, u_light_color, u_light_position, u_light_front, u_light_cone, v_world_position) * diffuseColor;
+	light += compute_light(u_light_info, normal, u_light_color, P, L, u_light_cone, v_world_position) * diffuseColor;
 	
-    if(metallicness != 0.0) light += specular_phong_pbr(normal, L, V, WP, roughness, f0, u_light_position) * u_light_color;
+    if(metallicness != 0.0 && metallicness < 0.1) light += specular_phong_pbr(normal, L, V, WP, roughness, f0, P) * u_light_color;
 	
 	light *= shadow_factor;
 
@@ -429,33 +528,111 @@ void main()
 	vec4 world_pos_proj = u_ivp * screen_pos;
 	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
 
-	vec3 light = vec3(0.0);
-
 	vec3 normal_map = texture(u_normal_texture, uv).rgb;
 	normal_map = normalize(normal_map * 2.0 - vec3(1.0));
 
-	float roughness = texture(u_metallic_texture, uv).g * 0.2;
-	float metallicness = texture(u_metallic_texture, uv).b * 0.2;
-
-	vec3 N = normalize(v_normal);
 	vec3 V = normalize(u_camera_position - world_pos); 
 	vec3 L = u_light_front;
 	vec3 P = u_light_position;
 
+	vec3 light = vec3(0.0);
+
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0) shadow_factor = testShadow(world_pos);
 
-	light += compute_light(u_light_info, normal_map, u_light_color, u_light_position, u_light_front, u_light_cone, world_pos);
-	
-	if(metallicness != 0.0) light += specular_phong(N, L, V, world_pos, roughness, metallicness, P) * u_light_color;	
-	
+	light += compute_light(u_light_info, normal_map, u_light_color, P, L, u_light_cone, world_pos);
+		
 	light *= shadow_factor;
+	
+	vec4 color = vec4(1.0);
+	color.xyz = light * albedo.xyz;
 
-	vec3 color = albedo.rgb * light; 
-
-	FragColor = vec4(color, albedo.a);
+	FragColor = color;
 	gl_FragDepth = depth;
 }
+
+
+
+
+
+
+
+
+\deferred_pbr.fs
+
+#version 330 core
+
+in vec3 v_normal;
+
+uniform sampler2D u_albedo_texture;
+uniform sampler2D u_emissive_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_depth_texture;
+
+uniform vec3 u_camera_position;
+
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+#include "lights"
+#include "normal"
+#include "pbr_equations"
+
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	vec3 albedo = texture( u_albedo_texture, uv ).rgb;
+
+	float depth = texture(u_depth_texture, uv).r;
+	if(depth == 1.0) discard;
+
+	vec4 screen_coord = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_proj = u_ivp * screen_coord;
+	vec3 world_pos = world_proj.xyz / world_proj.w;
+
+	float occlusion = texture(u_albedo_texture, uv).a;
+	float metallicness = texture(u_normal_texture, uv).a;
+	float roughness = texture(u_emissive_texture, uv).a;
+
+	vec3 normal_map = texture(u_normal_texture, uv).rgb;
+	vec3 normal = normalize(normal_map * 2.0 - vec3(1.0)); 
+	
+	//vec3 N = normalize(v_normal);
+	//mat3 TBN = cotangent_frame(N, world_pos, uv);
+	//normal = normalize(TBN * normal_map); //perturbed
+
+	vec3 V = normalize(u_camera_position - world_pos);
+	vec3 L = u_light_front;
+	vec3 H = normalize(V + L);
+	vec3 P = u_light_position;
+
+	vec3 f0 = mix( vec3(0.5), albedo.xyz, metallicness );
+	vec3 diffuseColor = (1.0 - metallicness) * albedo.xyz;
+
+	vec3 light = vec3(0.0);
+
+	float shadow_factor =  1.0;
+
+	if(u_shadow_param.x != 0 && u_light_info.x != NO_LIGHT)	shadow_factor = testShadow(world_pos);
+	
+	light += compute_light(u_light_info, normal, u_light_color, P, u_light_front, u_light_cone, world_pos); // * diffuseColor;
+
+	if(metallicness != 0.0) light += specular_phong_pbr(normal, L, V, world_pos, roughness, f0, P)* u_light_color;
+
+	light *= shadow_factor;
+
+	vec3 color = albedo.rgb * light;
+
+	FragColor = vec4(color, 1.0);
+}
+
+
 
 
 
@@ -504,8 +681,8 @@ void main()
 	vec3 normal_map = texture(u_normal_texture, uv).rgb;
 	normal_map = normalize(normal_map * 2.0 - vec3(1.0));
 
-	float roughness = texture(u_metallic_texture, uv).g * 0.2;
-	float metallicness = texture(u_metallic_texture, uv).b * 0.2;
+	float roughness = texture(u_emissive_texture, uv).a * 0.2;
+	float metallicness = texture(u_normal_texture, uv).a * 0.2;
 
 	vec3 N = normalize(v_normal);
 	vec3 V = normalize(u_camera_position - world_pos); 
@@ -515,9 +692,7 @@ void main()
 	float shadow_factor = 1.0;
 	if(u_shadow_param.x != 0.0) shadow_factor = testShadow(world_pos);
 
-	light += compute_light(u_light_info, normal_map, u_light_color, u_light_position, u_light_front, u_light_cone, world_pos);
-
-	if(metallicness != 0.0) light += specular_phong(N, L, V, world_pos, roughness, metallicness, P) * u_light_color;	
+	light += compute_light(u_light_info, normal_map, u_light_color, P, L, u_light_cone, world_pos);
 
 	light *= shadow_factor;
 
@@ -525,6 +700,86 @@ void main()
 
 	FragColor = vec4(color,albedo.a);
 	gl_FragDepth = depth;
+}
+
+
+
+
+
+
+
+\deferred_geometry_pbr.fs
+
+#version 330 core
+
+in vec3 v_normal;
+
+uniform sampler2D u_albedo_texture;
+uniform sampler2D u_emissive_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_depth_texture;
+
+uniform vec3 u_camera_position;
+
+uniform float u_time;
+uniform float u_alpha_cutoff;
+
+#include "lights"
+#include "normal"
+#include "pbr_equations"
+
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	vec3 albedo = texture( u_albedo_texture, uv ).rgb;
+
+	float depth = texture(u_depth_texture, uv).r;
+	if(depth == 1.0) discard;
+
+	vec4 screen_coord = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_proj = u_ivp * screen_coord;
+	vec3 world_pos = world_proj.xyz / world_proj.w;
+
+	float occlusion = texture(u_albedo_texture, uv).a;
+	float metallicness = texture(u_normal_texture, uv).a;
+	float roughness = texture(u_emissive_texture, uv).a;
+
+	vec3 normal_map = texture(u_normal_texture, uv).rgb;
+	vec3 normal = normalize(normal_map * 2.0 - vec3(1.0)); 
+	
+	//vec3 N = normalize(v_normal);
+	//mat3 TBN = cotangent_frame(N, world_pos, uv);
+	//normal = normalize(TBN * normal_map); //perturbed
+
+	vec3 V = normalize(u_camera_position - world_pos);
+	vec3 L = u_light_front;
+	vec3 H = normalize(V + L);
+	vec3 P = u_light_position;
+
+	vec3 f0 = mix( vec3(0.5), albedo.xyz, metallicness );
+	vec3 diffuseColor = (1.0 - metallicness) * albedo.xyz;
+
+	vec3 light = vec3(0.0);
+
+	float shadow_factor =  1.0;
+
+	if(u_shadow_param.x != 0 && u_light_info.x != NO_LIGHT)	shadow_factor = testShadow(world_pos);
+	
+	light += compute_light(u_light_info, normal, u_light_color, P, u_light_front, u_light_cone, world_pos); // * diffuseColor;
+
+	if(metallicness != 0.0 && metallicness < 0.1) light += specular_phong_pbr(normal, L, V, world_pos, roughness, f0, P) * u_light_color;
+
+	light *= shadow_factor;
+
+	vec3 color = albedo.rgb * light;
+
+	FragColor = vec4(color, 1.0);
 }
 
 
@@ -580,8 +835,7 @@ uniform vec3 u_ambient_light;
 out vec4 FragColor;
 
 void main()
-{	
-
+{
 	float depth = texture(u_depth_texture, v_uv).x;
 	if (depth == 1.0) discard;
 
@@ -680,6 +934,358 @@ void main()
 
 
 
+\spherical_probe.fs
+
+#version 330 core
+
+in vec3 v_world_position;
+in vec3 v_normal;
+
+uniform vec3 u_coeffs[9];
+
+const float Pi = 3.141592654;
+const float CosineA0 = Pi;
+const float CosineA1 = (2.0 * Pi) / 3.0;
+const float CosineA2 = Pi * 0.25;
+struct SH9 { float c[9]; }; //to store weights
+struct SH9Color { vec3 c[9]; }; //to store colors
+
+void SHCosineLobe(in vec3 dir, out SH9 sh) //SH9
+{
+	// Band 0
+	sh.c[0] = 0.282095 * CosineA0;
+	// Band 1
+	sh.c[1] = 0.488603 * dir.y * CosineA1; 
+	sh.c[2] = 0.488603 * dir.z * CosineA1;
+	sh.c[3] = 0.488603 * dir.x * CosineA1;
+	// Band 2
+	sh.c[4] = 1.092548 * dir.x * dir.y * CosineA2;
+	sh.c[5] = 1.092548 * dir.y * dir.z * CosineA2;
+	sh.c[6] = 0.315392 * (3.0 * dir.z * dir.z - 1.0) * CosineA2;
+	sh.c[7] = 1.092548 * dir.x * dir.z * CosineA2;
+	sh.c[8] = 0.546274 * (dir.x * dir.x - dir.y * dir.y) * CosineA2;
+}
+
+vec3 ComputeSHIrradiance(in vec3 normal, in SH9Color sh)
+{
+	// Compute the cosine lobe in SH, oriented about the normal direction
+	SH9 shCosine;
+	SHCosineLobe(normal, shCosine);
+	// Compute the SH dot product to get irradiance
+	vec3 irradiance = vec3(0.0);
+	for(int i = 0; i < 9; ++i)
+		irradiance += sh.c[i] * shCosine.c[i];
+
+	return irradiance;
+}
+
+out vec4 FragColor;
+
+void main()
+{
+	vec4 color = vec4(1.0);
+
+	vec3 N = normalize(v_normal);
+
+	SH9Color sh;
+	for (int i = 0; i < 9; i++)	sh.c[i] = u_coeffs[i];
+
+	color.xyz = max(vec3(0.0), ComputeSHIrradiance(N, sh));
+
+	FragColor = color;
+}
+
+
+
+
+
+\reflection_probe.fs
+
+#version 330 core
+
+in vec3 v_position;
+in vec3 v_world_position;
+in vec3 v_normal;
+
+uniform samplerCube u_texture;
+uniform vec3 u_camera_position;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec3 E = v_world_position - u_camera_position; //normalize?
+	vec3 N = normalize(v_normal);
+	vec3 R = reflect(E, N);
+
+	vec4 color = texture(u_texture, R, 0.0);
+
+	FragColor = color;
+}
+
+
+
+
+\irradiance.fs
+
+#version 330 core
+
+uniform sampler2D u_albedo_texture;
+uniform sampler2D u_normal_texture;
+uniform sampler2D u_depth_texture;
+uniform sampler2D u_probes_texture;
+
+uniform float u_irr_normal_distance;
+uniform int u_num_probes;
+uniform float u_irr_multiplier;
+
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+uniform vec3 u_irr_start;
+uniform vec3 u_irr_end;
+uniform vec3 u_irr_dims;
+uniform vec3 u_irr_delta;
+
+const float Pi = 3.141592654;
+const float CosineA0 = Pi;
+const float CosineA1 = (2.0 * Pi) / 3.0;
+const float CosineA2 = Pi * 0.25;
+struct SH9 { float c[9]; }; //to store weights
+struct SH9Color { vec3 c[9]; }; //to store colors
+
+void SHCosineLobe(in vec3 dir, out SH9 sh) //SH9
+{
+	// Band 0
+	sh.c[0] = 0.282095 * CosineA0;
+	// Band 1
+	sh.c[1] = 0.488603 * dir.y * CosineA1; 
+	sh.c[2] = 0.488603 * dir.z * CosineA1;
+	sh.c[3] = 0.488603 * dir.x * CosineA1;
+	// Band 2
+	sh.c[4] = 1.092548 * dir.x * dir.y * CosineA2;
+	sh.c[5] = 1.092548 * dir.y * dir.z * CosineA2;
+	sh.c[6] = 0.315392 * (3.0 * dir.z * dir.z - 1.0) * CosineA2;
+	sh.c[7] = 1.092548 * dir.x * dir.z * CosineA2;
+	sh.c[8] = 0.546274 * (dir.x * dir.x - dir.y * dir.y) * CosineA2;
+}
+vec3 ComputeSHIrradiance(in vec3 normal, in SH9Color sh)
+{
+	// Compute the cosine lobe in SH, oriented about the normal direction
+	SH9 shCosine;
+	SHCosineLobe(normal, shCosine);
+	// Compute the SH dot product to get irradiance
+	vec3 irradiance = vec3(0.0);
+	for(int i = 0; i < 9; ++i)
+		irradiance += sh.c[i] * shCosine.c[i];
+
+	return irradiance;
+}
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	vec4 albedo = texture(u_albedo_texture, uv);		
+
+	float depth = texture(u_depth_texture, uv).x;
+	if (depth == 1.0) discard;
+
+	vec4 screen_pos = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_pos_proj = u_ivp * screen_pos;
+	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
+
+	vec3 normal_map = texture(u_normal_texture, uv).rgb;
+	normal_map = normalize(normal_map * 2.0 - vec3(1.0));
+
+
+
+	//computing nearest probe index based on world position
+	vec3 irr_range = u_irr_end - u_irr_start;
+	vec3 irr_local_pos = clamp( world_pos - u_irr_start + normal_map * u_irr_normal_distance, vec3(0.0), irr_range );
+	
+	//convert from world pos to grid pos
+	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
+	
+	//round values as we cannot fetch between rows for now
+	vec3 local_indices = round( irr_norm_pos );
+	
+	//compute in which row is the probe stored
+	float row = local_indices.x + local_indices.y * u_irr_dims.x + local_indices.z * u_irr_dims.x * u_irr_dims.y;
+	
+	//find the UV.y coord of that row in the probes texture
+	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
+
+
+
+	SH9Color sh;
+	
+	//fill the coefficients
+	const float d_uvx = 1.0 / 9.0;
+	for(int i = 0; i < 9; ++i)
+	{
+		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
+		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
+	}
+	
+	vec3 irradiance = max(vec3(0.0), ComputeSHIrradiance( normal_map, sh ) * u_irr_multiplier);
+	irradiance *= albedo.xyz;
+
+	FragColor = vec4(irradiance, 1.0); 
+}
+
+
+
+
+
+
+\volumetric.fs
+
+#version 330 core
+
+uniform sampler2D u_depth_texture;
+
+uniform mat4 u_viewprojection;
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+uniform vec3 u_camera_position;
+uniform float u_air_density;
+
+uniform float u_rand;
+uniform float u_time;
+
+#define SAMPLES 64
+
+#include "lights"
+
+layout(location = 0) out vec4 FragColor;
+
+float rand(vec2 co)
+{
+    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+		
+	float depth = texture(u_depth_texture, uv).r;
+
+	// if(depth < 1.0)	//skip skybox pixels
+	
+	vec4 screen_coord = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_proj = u_ivp * screen_coord;
+	vec3 world_pos = world_proj.xyz / world_proj.w;
+
+	vec3 ray_start = u_camera_position;
+	vec3 ray_direction = world_pos - ray_start;
+	float ray_lenght = length(ray_direction);
+
+	ray_direction /= ray_lenght;
+	ray_direction = normalize(ray_direction);
+	ray_lenght = min(500.0, ray_lenght);
+	float step_dist = ray_lenght / float(SAMPLES);
+
+	ray_start += ray_direction * rand(uv + vec2(u_rand, u_time)) * step_dist;
+
+	vec3 current_pos = ray_start;
+	vec3 ray_offset = ray_direction * step_dist;
+
+	vec3 volumetric = vec3(0.0);
+	float transparency = 1.0;
+	float air_step = u_air_density * step_dist / 10;
+
+	for (int i = 0; i < SAMPLES; i++)
+	{
+		vec3 v = vec3(1.0);
+		vec3 light = vec3(0.0);
+		float shadow_factor = 1.0;
+		if (u_shadow_param.x != 0.0) shadow_factor = testShadow(current_pos);
+		
+		if (int(u_light_info.x) == DIRECTIONAL_LIGHT)
+		{
+			light += u_light_color;		
+		}
+		else if (int(u_light_info.x) == POINT_LIGHT || int(u_light_info.x) == SPOT_LIGHT)
+		{
+			vec3 L = u_light_position - current_pos;
+			float dist = length(L);
+			L /= dist; //to normalize L
+		
+			float attenuation = max(0.0, (u_light_info.z - dist) / u_light_info.z);
+		
+			if (int(u_light_info.x) == SPOT_LIGHT)
+			{
+				float cos_angle = dot(u_light_front, L);
+				if (cos_angle < u_light_cone.y) attenuation = 0.0;
+				else if (cos_angle < u_light_cone.x) attenuation *= 1.0 - (cos_angle - u_light_cone.x) / (u_light_cone.y - u_light_cone.x);
+			}
+			light = u_light_color * attenuation;
+		}
+
+		light *= shadow_factor;
+
+		volumetric += (u_ambient_light + light) * transparency * air_step;
+
+		current_pos.xyz += ray_offset;
+
+		transparency -= air_step;
+		if (transparency < 0.001) break;
+	}
+
+	FragColor = vec4(volumetric, 1.0 - clamp(transparency, 0.0, 1.0)); 
+	
+}
+
+
+
+
+
+
+\decals.fs
+
+#version 330 core
+
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+uniform mat4 u_imodel;
+
+uniform sampler2D u_depth_texture;
+uniform sampler2D u_color_texture;
+
+layout(location = 0) out vec4 FragColor;
+layout(location = 1) out vec4 NormalColor;
+layout(location = 2) out vec4 ExtraColor; //for now only emissive
+
+void main()
+{	
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+
+	float depth = texture(u_depth_texture, uv).x;
+	if (depth == 1.0) discard;
+
+	vec4 screen_pos = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+	vec4 world_pos_proj = u_ivp * screen_pos;
+	vec3 world_pos = world_pos_proj.xyz / world_pos_proj.w;
+
+	vec3 decal_space = (u_imodel * vec4(world_pos, 1.0)).xyz + vec3(0.5);
+	if (decal_space.x < -1.0 || decal_space.x > 1.0 ||
+		decal_space.y < -1.0 || decal_space.y > 1.0 ||
+		decal_space.z < -1.0 || decal_space.z > 1.0 ) discard;
+	
+	vec2 decal_uv = decal_space.xy;
+	vec4 color = texture(u_color_texture, decal_uv);
+
+	FragColor = color;
+	ExtraColor = vec4(0.0);
+	NormalColor = vec4(0.0);
+}
+
+
+
+
+
 
 
 \skybox.fs
@@ -689,6 +1295,8 @@ void main()
 in vec3 v_position;
 in vec3 v_world_position;
 
+uniform float u_skybox_intensity;
+
 uniform samplerCube u_texture;
 uniform vec3 u_camera_position;
 out vec4 FragColor;
@@ -696,7 +1304,7 @@ out vec4 FragColor;
 void main()
 {
 	vec3 E = v_world_position - u_camera_position;
-	vec4 color = texture( u_texture, E );
+	vec4 color = texture( u_texture, E ) * u_skybox_intensity;
 	FragColor = color;
 }
 
