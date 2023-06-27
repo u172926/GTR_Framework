@@ -23,6 +23,7 @@ irradiance quad.vs irradiance.fs
 reflection_probe basic.vs reflection_probe.fs
 volumetric quad.vs volumetric.fs
 decals basic.vs decals.fs
+mirror basic.vs mirror.fs
 
 //POST FX SHADERS
 blur quad.vs blur.fs
@@ -147,30 +148,34 @@ void main()
 
 #version 330 core
 
-uniform sampler2D u_texture; 
-in vec2 v_uv;
+precision highp float;
+
+varying vec2 v_uv;
+uniform sampler2D u_texture;
 
 uniform vec2 u_offset;
 uniform float u_intensity;
 
 out vec4 FragColor;
 
-void main()
+void main() 
 {
-	vec4 sum = vec4(0.0);
+   vec4 sum = vec4(0.0);
 
-	sum += texture(u_texture, v_uv + u_offset * -4.0) * 0.05/0.98;
-	sum += texture(u_texture, v_uv + u_offset * -3.0) * 0.09/0.98;
-	sum += texture(u_texture, v_uv + u_offset * -2.0) * 0.12/0.98;
-	sum += texture(u_texture, v_uv + u_offset * -1.0) * 0.15/0.98;
-	sum += texture(u_texture, v_uv) * 0.05/0.98;
-	sum += texture(u_texture, v_uv + u_offset * 1.0) * 0.15/0.98;
-	sum += texture(u_texture, v_uv + u_offset * 2.0) * 0.12/0.98;
-	sum += texture(u_texture, v_uv + u_offset * 3.0) * 0.09/0.98;
-	sum += texture(u_texture, v_uv + u_offset * 4.0) * 0.05/0.98;
+   sum += texture(u_texture, v_uv + u_offset * -4.0) * 0.05/0.98;
+   sum += texture(u_texture, v_uv + u_offset * -3.0) * 0.09/0.98;
+   sum += texture(u_texture, v_uv + u_offset * -2.0) * 0.12/0.98;
+   sum += texture(u_texture, v_uv + u_offset * -1.0) * 0.15/0.98;
+   sum += texture(u_texture, v_uv) * 0.16/0.98;
+   sum += texture(u_texture, v_uv + u_offset * 4.0) * 0.05/0.98;
+   sum += texture(u_texture, v_uv + u_offset * 3.0) * 0.09/0.98;
+   sum += texture(u_texture, v_uv + u_offset * 2.0) * 0.12/0.98;
+   sum += texture(u_texture, v_uv + u_offset * 1.0) * 0.15/0.98;
 
-	FragColor = sum * u_intensity;
+   FragColor = u_intensity * sum;
 }
+
+
 
 
 
@@ -183,7 +188,6 @@ void main()
 
 uniform sampler2D u_texture;
 uniform sampler2D u_depth_texture;
-in vec2 v_uv;
 
 uniform mat4 u_ivp;
 uniform mat4 u_prev_vp;
@@ -239,11 +243,77 @@ uniform float u_average_lum;
 uniform float u_lumwhite2;
 uniform float u_igamma; //inverse gamma
 uniform float u_brightness;
+uniform float u_contrast;
+uniform float u_saturation;
+uniform float u_vignett;
+uniform float u_noise_grain;
+uniform float u_barrel_distortion;
+uniform float u_pincushion_distortion;
+uniform float u_distortion;
+uniform bool u_chromatic_aberration;
+
+#include "color_filters"
+uniform float u_warmness;
+uniform float u_sepia;
+uniform float u_noir;
 
 out vec4 FragColor;
 
-void main() {
-	vec4 color = texture2D( u_albedo_texture, v_uv );
+float random(vec2 st) 
+{
+    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+}
+vec2 barrelDistortion(vec2 coord, float amt) 
+{
+	vec2 cc = coord - 0.5;
+	float dist = dot(cc, cc);
+	return coord + cc * dist * amt;
+}
+vec2 pincushionDistortion(vec2 coord, float amt) 
+{
+    vec2 cc = coord - 0.5;
+    float dist = dot(cc, cc);
+    return coord - cc * dist * amt;
+}
+
+float sat( float t ){return clamp( t, 0.0, 1.0 );}
+float linterp( float t ) {return sat( 1.0 - abs( 2.0*t - 1.0 ) );}
+float remap( float t, float a, float b ) {return sat( (t - a) / (b - a) );}
+vec4 spectrum_offset( float t ) 
+{
+	vec4 ret;
+	float lo = step(t,0.5);
+	float hi = 1.0-lo;
+	float w = linterp( remap( t, 1.0/6.0, 5.0/6.0 ) );
+	ret = vec4(lo,1.0,hi, 1.) * vec4(1.0-w, w, 1.0-w, 1.);
+
+	return pow( ret, vec4(1.0/2.2) );
+}
+
+const int num_iter = 12;
+const float reci_num_iter_f = 1.0 / float(num_iter);
+
+void main() 
+{
+	vec4 color = vec4(0.0);
+	vec4 sumw = vec4(0.0);	
+
+	if (!u_chromatic_aberration) color = texture2D( u_albedo_texture, (barrelDistortion(v_uv, u_barrel_distortion) + pincushionDistortion(v_uv, u_pincushion_distortion)) * 0.5);
+	else 
+	{
+		for ( int i = 0; i < num_iter; ++i )
+			{
+				float t = float(i) * reci_num_iter_f;
+				vec4 w = spectrum_offset( t );
+				sumw += w;
+				color += w * texture2D( u_albedo_texture, ( barrelDistortion(v_uv, u_barrel_distortion * t ) + pincushionDistortion(v_uv, u_pincushion_distortion * t )) * 0.5);
+			}	
+		color /= sumw;
+	}
+
+	float noise_offset = random(v_uv); // Random offset the noise pattern
+    float noiseValue = random(v_uv + vec2(noise_offset)) * u_noise_grain * 0.5;
+    color.xyz += noiseValue;
 
 	float lum = dot(color.xyz, vec3(0.2126, 0.7152, 0.0722));
 	float L = (u_scale / u_average_lum) * lum;
@@ -254,9 +324,27 @@ void main() {
 	color.xyz = pow( color.xyz, vec3( u_igamma ) );
 
 	color.xyz *= u_brightness;
+	color.xyz = saturation(color.xyz, u_saturation);
+
+	vec3 midtone = vec3(0.5);
+	color.xyz = midtone + (color.xyz - midtone) * vec3(u_contrast);
+
+	color.xyz *= 1.2 - length(v_uv - vec2(0.5)) * u_vignett;
+
+	if (u_warmness != 1.0) color.xyz = hotAndColdEffect(color.xyz, u_warmness);
+	color.xyz = vintageFilter(color.xyz, u_sepia);
+	color.xyz = noirEffect(color.xyz, u_noir);
+
+	//color.xyz = horrorFilter(color.xyz);
+	//color.xyz = dramaFilter(color.xyz);
+	//color.xyz = actionFilter(color.xyz);
 
 	FragColor = color;
 }
+
+
+
+
 
 
 
@@ -1080,6 +1168,89 @@ vec3 ComputeSHIrradiance(in vec3 normal, in SH9Color sh)
 
 	return irradiance;
 }
+vec3 ComputeIrradiance( vec3 local_indices, vec3 N )
+{
+	//compute in which row is the probe stored
+	float row = local_indices.x + 
+	local_indices.y * u_irr_dims.x + 
+	local_indices.z * u_irr_dims.x * u_irr_dims.y;
+
+	//find the UV.y coord of that row in the probes texture
+	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
+
+	SH9Color sh;
+
+	//fill the coefficients
+	const float d_uvx = 1.0 / 9.0;
+	for(int i = 0; i < 9; ++i)
+	{
+		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
+		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
+	}
+
+	//now we can use the coefficients to compute the irradiance
+	vec3 irradiance = max(vec3(0.0), ComputeSHIrradiance( N, sh ) * u_irr_multiplier);
+	return irradiance;
+}
+vec3 trilinearInterpolation(vec3 local_indices, vec3 factors, vec3 N)
+{
+	//local_indices points to Left,Bottom,Far
+	vec3 indicesLBF = local_indices;
+
+	//right bottom far index
+	vec3 indicesRBF = local_indices;
+	indicesRBF.x += 1; //from left to right
+
+	//left top far index
+	vec3 indicesLTF = local_indices;
+	indicesLTF.y += 1; 
+
+	//right top far index
+	vec3 indicesRTF = local_indices;
+	indicesRTF.y += 1; 
+	indicesRTF.x += 1; 
+
+	//left bottom near index
+	vec3 indicesLBN = local_indices;
+	indicesLBN.z += 1; 
+
+	//right bottom near index
+	vec3 indicesRBN = local_indices;
+	indicesRBN.x += 1; 
+	indicesRBN.z += 1; 
+
+	//left top near index
+	vec3 indicesLTN = local_indices;
+	indicesLTN.y += 1; 
+	indicesLTN.z += 1; 
+
+	// right top near index
+	vec3 indicesRTN = local_indices;
+	indicesRTN.y += 1; 
+	indicesRTN.x += 1; 
+	indicesRTN.z += 1; 
+
+	//compute irradiance for every corner
+	vec3 irrLBF = ComputeIrradiance( indicesLBF, N );
+	vec3 irrRBF = ComputeIrradiance( indicesRBF, N );
+	vec3 irrLTF = ComputeIrradiance( indicesLTF, N );
+	vec3 irrRTF = ComputeIrradiance( indicesRTF, N );
+	vec3 irrLBN = ComputeIrradiance( indicesLBN, N );
+	vec3 irrRBN = ComputeIrradiance( indicesRBN, N );
+	vec3 irrLTN = ComputeIrradiance( indicesLTN, N );
+	vec3 irrRTN = ComputeIrradiance( indicesRTN, N );
+
+	vec3 irrTF = mix( irrLTF, irrRTF, factors.x );
+	vec3 irrBF = mix( irrLBF, irrRBF, factors.x );
+	vec3 irrTN = mix( irrLTN, irrRTN, factors.x );
+	vec3 irrBN = mix( irrLBN, irrRBN, factors.x );
+
+	vec3 irrT = mix( irrTF, irrTN, factors.z );
+	vec3 irrB = mix( irrBF, irrBN, factors.z );
+
+	return mix( irrB, irrT, factors.y );
+}
+
 
 out vec4 FragColor;
 
@@ -1109,28 +1280,12 @@ void main()
 	vec3 irr_norm_pos = irr_local_pos / u_irr_delta;
 	
 	//round values as we cannot fetch between rows for now
-	vec3 local_indices = round( irr_norm_pos );
-	
-	//compute in which row is the probe stored
-	float row = local_indices.x + local_indices.y * u_irr_dims.x + local_indices.z * u_irr_dims.x * u_irr_dims.y;
-	
-	//find the UV.y coord of that row in the probes texture
-	float row_uv = (row + 1.0) / (u_num_probes + 1.0);
+	vec3 local_indices = floor( irr_norm_pos ); 
 
+	//now we have the interpolation factors
+	vec3 factors = irr_norm_pos - local_indices; 
 
-
-	SH9Color sh;
-	
-	//fill the coefficients
-	const float d_uvx = 1.0 / 9.0;
-	for(int i = 0; i < 9; ++i)
-	{
-		vec2 coeffs_uv = vec2( (float(i)+0.5) * d_uvx, row_uv );
-		sh.c[i] = texture( u_probes_texture, coeffs_uv).xyz;
-	}
-	
-	vec3 irradiance = max(vec3(0.0), ComputeSHIrradiance( normal_map, sh ) * u_irr_multiplier);
-	irradiance *= albedo.xyz;
+	vec3 irradiance = trilinearInterpolation(local_indices, factors, normal_map) * albedo.xyz;
 
 	FragColor = vec4(irradiance, 1.0); 
 }
@@ -1159,6 +1314,10 @@ uniform float u_time;
 
 #include "lights"
 
+// Adjust this to control the overall density
+const float densityFactor = 0.1; 
+const float densityExponent = 2.0;
+
 layout(location = 0) out vec4 FragColor;
 
 float rand(vec2 co)
@@ -1171,8 +1330,6 @@ void main()
 	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
 		
 	float depth = texture(u_depth_texture, uv).r;
-
-	// if(depth < 1.0)	//skip skybox pixels
 	
 	vec4 screen_coord = vec4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
 	vec4 world_proj = u_ivp * screen_coord;
@@ -1194,7 +1351,9 @@ void main()
 
 	vec3 volumetric = vec3(0.0);
 	float transparency = 1.0;
-	float air_step = u_air_density * step_dist / 10;
+	float air_step =  u_air_density * step_dist / 10;
+
+
 
 	for (int i = 0; i < SAMPLES; i++)
 	{
@@ -1226,7 +1385,7 @@ void main()
 
 		light *= shadow_factor;
 
-		volumetric += (u_ambient_light + light) * transparency * air_step;
+		volumetric += (u_ambient_light + light) * transparency * air_step ;
 
 		current_pos.xyz += ray_offset;
 
@@ -1288,6 +1447,49 @@ void main()
 
 
 
+
+
+\mirror.fs
+
+#version 330 core
+
+in vec3 v_position;
+in vec3 v_world_position;
+in vec3 v_normal;
+
+uniform sampler2D u_texture;
+uniform vec3 u_camera_position;
+
+uniform mat4 u_ivp;
+uniform vec2 u_iRes;
+
+out vec4 FragColor;
+
+void main()
+{
+	vec2 uv = gl_FragCoord.xy * u_iRes.xy;
+	uv.x = 1.0 - uv.x;
+
+	if(v_world_position.y < 0.0) discard; //discard reflection if below the floor
+
+	vec3 E = normalize(v_world_position - u_camera_position); 
+	vec3 N = normalize(v_normal);
+	vec3 R = reflect(E, N);
+	float fresnel = 1.0 - max(0.0, dot(-E, N));
+
+	vec4 color = textureLod(u_texture, uv, 1.0) * fresnel;
+
+	FragColor = color;
+}
+
+
+
+
+
+
+
+
+
 \skybox.fs
 
 #version 330 core
@@ -1296,6 +1498,7 @@ in vec3 v_position;
 in vec3 v_world_position;
 
 uniform float u_skybox_intensity;
+bool u_flip;
 
 uniform samplerCube u_texture;
 uniform vec3 u_camera_position;
@@ -1304,6 +1507,7 @@ out vec4 FragColor;
 void main()
 {
 	vec3 E = v_world_position - u_camera_position;
+	if (u_flip == true) E.y *= -1.0;
 	vec4 color = texture( u_texture, E ) * u_skybox_intensity;
 	FragColor = color;
 }
@@ -1616,10 +1820,67 @@ vec3 compute_light(vec4 u_light_info, vec3 normal, vec3 u_light_color, vec3 u_li
 }
 
 
+\color_filters
 
+vec3 hotAndColdEffect(vec3 color, float warmness) {
 
+    vec3 warmColor = vec3(1.0, 0.5, 0.2) * warmness; 
+    vec3 coldColor = vec3(0.2, 0.5, 1.0) * (2.0 - warmness);
 
+    // Interpolate between warm and cold colors based on the original color
+    return (mix(vec3(0.0), coldColor, color) + mix(vec3(0.0), warmColor, color)) ;
+}
+vec3 saturation(vec3 color, float saturation) {
+    float meanValue = (color.r + color.g + color.b) / 3.0;
+    return color + (color - meanValue) * saturation * 2.0;
+}
+vec3 horrorFilter(vec3 color) {
+    vec3 redColor = vec3(1.0, 0.0, 0.0); // Adjust the red color tone
+    vec3 desaturateColor = vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))); // Desaturate the color
 
+    // Blend the desaturated color with red to create a horror effect
+    return mix(desaturateColor, redColor, 0.5); // Adjust the blending factor
+}
+vec3 dramaFilter(vec3 color) {
+    vec3 highContrastColor = vec3(5.0); // Adjust the high contrast color tone
+
+    // Increase contrast by subtracting the mean value from each channel
+    float meanValue = (color.r + color.g + color.b) / 3.0;
+    return color + (color - meanValue) * highContrastColor;
+}
+vec3 actionFilter(vec3 color) {
+    float saturationAmount = 2.0; // Adjust the saturation amount
+    float contrastAmount = 1.5; // Adjust the contrast amount
+
+    // Increase saturation and contrast for an action effect
+    vec3 desaturatedColor = vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))); // Desaturate the color
+    vec3 saturatedColor = mix(desaturatedColor, color, saturationAmount); // Increase saturation
+    vec3 highContrastColor = vec3(0.5) + (saturatedColor - vec3(0.5)) * contrastAmount; // Increase contrast
+
+    return highContrastColor;
+}
+vec3 vintageFilter(vec3 color, float sepia) {
+    // Apply a sepia tone to the color
+    float rr = .3; float rg = .769; float rb = .189;
+    
+    float gr = .3; float gg = .686; float gb = .168;
+    
+    float br = .272; float bg = .534; float bb = .131;
+    
+    float red = (rr * color.r) + (rb * color.b) + (rg * color.g);
+    float green = (gr * color.r) + (gb * color.b) + (gg * color.g);
+    float blue = (br * color.r) + (bb * color.b) + (bg * color.g); 
+
+	vec3 sepiaColor = vec3(red, green, blue);
+	return mix(color, sepiaColor, sepia / 2.0); // Adjust the blending factor  
+}
+vec3 noirEffect(vec3 color, float noir) {
+    // Convert the color to grayscale
+    vec3 grayscale = vec3(dot(color, vec3(0.2126, 0.7152, 0.0722)));
+
+    // Apply a black and white noir effect by blending the grayscale with a desaturated color
+    return mix(color, grayscale, noir / 2.0); // Adjust the blending factor
+}
 
 
 

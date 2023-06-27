@@ -75,19 +75,34 @@ namespace SCN {
 		bool show_global_position;
 		bool show_ssao;
 		bool show_probes;
+		bool show_planar_ref;
 		bool show_irradiance;
 		bool show_ref_probes;
 		bool show_volumetric;
 		bool show_postFX;
+		bool flip;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
 
-		float brightness;
 		float tonemapper_scale;
 		float average_lum;
 		float lum_white2;
 		float gamma;
+		float brightness;
+		float saturation;
+		float contrast;
+		float vignett;
+		float noise_grain;
+		float barrel_distortion;
+		float pincushion_distortion;
+		bool chromatic_aberration;
+
+		float warmness;
+		float sepia;
+		float noir;
+
+		float instensity;
 
 		GFX::Texture* skybox_cubemap;
 		GFX::Texture* probes_texture;
@@ -97,6 +112,7 @@ namespace SCN {
 		GFX::Mesh sphere;
 		GFX::Mesh* quad;
 		GFX::Mesh cube;
+		GFX::Mesh plane;
 
 		//vector of all the lights of the scene
 		std::vector<LightEntity*> lights;
