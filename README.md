@@ -3,40 +3,41 @@ Andrea Tortato - andrea.tortato01@estudiant.upf.edu - NIA: 231603
 Edgar Espinos - edgar.espinos01@estudiant.upf.edu - NIA: 230024
 
 # GTR Framework
-The GTR Framework is an OpenGL C++ framework used for teaching real-time graphics at Universitat Pompeu Fabra. This framework allows you to move around the scene using the WASD, Q and E keys and render and manipulate elements of a scene such as meshes with specific textures and lights, altering the illumination of the scene in an intuitive way using a graphical user interface (GUI).
+The GTR Framework is an OpenGL C++ framework used for teaching real-time graphics at Universitat Pompeu Fabra. This framework allows you to navigate the scene using the WASD, Q, and E keys, and render and manipulate elements such as meshes with specific textures and lights. You can alter the illumination of the scene through an intuitive graphical user interface (GUI).
 
-To execute the application open the GTR_application.exe file.
+To execute the application, open the GTR_application.exe file.
 
 ### User Interface
-The framework provides a graphical user interface that lets you select specific objects in the scene and change their state, such as position, color, or render the entire scene in different modes. You can also select prefab objects and change their position, rotation, and scale, as well as alter the different parameters of the lights, such as intensity, color, shadow bias, etc.
-You are also going to be able to view the scene in seperate buffers to differentiate between the different elements and textures that compose the scene
+The framework provides a graphical user interface that allows you to select specific objects in the scene and modify their properties, such as position and color. You can also render the entire scene in different modes and adjust parameters of the lights, including intensity, color, and shadow bias. Additionally, you can view the scene in separate buffers to distinguish between different elements and textures.
+You will be able to manipulate the scene by adding relfective elements, volumetric elemets, chnage how the light interacts with the scene, color correctiopn, post processing effects and mush more.
 
 ### Lights
-It also supports different types of lights, including point lights, directional lights, and spotlights. Each type of light affects the scene in a different way, and you can adjust the different parameters of each light using the GUI.
-The directional and spot light cast shadows and we can observe the casted shadow by enabeling the Shadow Map box.
+The framework supports various types of lights, including point lights, directional lights, and spotlights. Each type of light affects the scene differently, and you can adjust their parameters using the GUI. The directional and spotlights cast shadows, which can be observed by enabling the Shadow Map option.
+You can decide to enable the Irradiance for a more realistic look (be sure to upload the probes firsts to claculate it) as well as the reflections also be calculating the relfection probes in advance. Also, enable planar reflections to be balke to add to scene 100% reflective objects such as mirrors or water surfaces.
+To add a more drammatic look to your scene enabke the volumetric rendering option to create a fog that will cast onto your scene.
 
 ### Rendering Modes
-Apart from just rendering the elements of the scene you can also render their bounding boxes or view them by their wireframes. You can also choose to view the shadow maps of the lights which cast shadows.
-All of the above can be done choosing firm three rendering modes:
-- TEXTURE mode: Renders the scene with just the objects themselves and their textures.
-- LIGHTS mode: Like texture mode but also renders the different types of lights, how they contribute to the illumination of the objects in the scene and cast shadows, including normal maps and reflections which make the scene look more realistic.
-- DEFFERED mode: Like lights mode but the scene is rendered in two steps, geometry and lighting, allowing for efficient rendering of complex scenes with multiple light sources and advanced lighting effects.
+In addition to rendering the elements of the scene, you can also choose to render their bounding boxes or view them in wireframe mode. You can also visualize the shadow maps of the lights that cast shadows. These options are available in three rendering modes:
+
+TEXTURE mode: Renders the scene with objects and their textures.
+LIGHTS mode: Similar to texture mode but also renders different types of lights, their contribution to object illumination, and shadows. This mode includes normal maps and reflections for a more realistic appearance.
+DEFERRED mode: Similar to lights mode, but the scene is rendered in two steps, geometry and lighting. This enables efficient rendering of complex scenes with multiple light sources and advanced lighting effects.
+We have focus most of our algorithms in this rendering mode since it's the one that renderes the scene in a more realistic way then the other two.
 
 ### Shader Modes
-For the three rendering modes explained above we have different shaders we can apply:
-- For the TEXTURE rendering mode we can either pass the TEXTURE shader, whcih renders the scene only with the color of the textures and occlusion, or the FLAT shader, which is mostly used to enhance the performance of our application when rendering other elements, such as shadows, in which we render the polygons of the objects in our scene without textures or lighting.
-- For the LIGHTS mode we can choose the MULTIPASS shader, which passes all of the lights in the scene and perfors multiple rendering passes to obtain realistic lighting effects, or the PBR (Physically based rendering) shader which simulates how light reflects in the real world based on how reflective the texture of an objects is
+For the aftrementioned rendering modes, different shaders can be applied:
+
+In the TEXTURE rendering mode, you can choose either the TEXTURE shader, which renders the scene with textures and occlusion, or the FLAT shader, primarily used for performance optimization when rendering elements such as shadows. The FLAT shader renders polygons without textures or lighting.
+In the LIGHTS and DEFERRED mode, you can choose the MULTIPASS shader, which handles all lights in the scene and performs multiple rendering passes for realistic lighting effects. Alternatively, you can select the PBR (Physically Based Rendering) shader, which simulates real-world light reflection based on the reflectivity of object textures.
 
 ### Deferred rendering
-While a PBR shader is not yet implemented for the DEFERRED rendering mode we can still use it to observe how the scene is construcetd and how changing different parameters changes our scene, such as the tonemapper slider whcih we can modify to change how the lighting affects our scene.
-We can for instance show the different GBuffers that compose our scene in 4 separe ones: texture, which only displays the textures and colors of our scne, normal, which shows the normal map, emissive, which showa the emissive textures of the scene, and zbuffer, with which we can visualize the depth our our scene.
-By activating the GlobalPosition box we are able to clearly take a look at all of the objects in our scene to distinguish them form one another.
-Lastly we can enable the SSAO to look at the scene usign ambient occlusion, whcih is helpfull for getting a sence of the geometry of the scene without computing textures or lights. We can change the radius of the SSAO (which is what determines the radius of the speheres that are comoputed in each point of the scene to obtain the ambient occlusion) to blur the scene, if we want to look at it from far away, or enhance the details (by reducing the radius) to see them more clearly
+As said, this renderiong more offers more tools to manipulate the scene then the others. For example, you can enable the tonemapper sliders to adjust the impact of lighting, color correct the scene and apply many kinds of filters and effects. The DEFERRED mode allows viewing the various G-buffers that compose the scene: texture, which displays textures and colors; normal, which shows the normal map; emissive, which displays emissive textures; and z-buffer, which visualizes the scene's depth. Enabling the GlobalPosition option provides a clear view of objects in the scene for better distinction. Finally, enabling SSAO (Screen Space Ambient Occlusion) allows viewing the scene with ambient occlusion, which helps understand the scene's geometry without computing textures or lights. The SSAO radius can be adjusted to blur the scene for a distant view or enhance details by reducing the radius.
+Finally we've implemented the option to add decal objects to be able to add any 2D image to the texture of an objects in the scene
+
+###Tonemapper
+The tonemapper slider we offer gives you the ability to change the look of the scene to make it as aesthetic as you want. You will be able to chnage different parameters to correct the colors of the scene in the way you prefer as well as add different filters for a more specific look, such as sepia, noir and vignett filters, hot and cold, grain effect, change the constrast, brightness and saturation, add chromatic abberations with lens distorsions or bloom effect.
 
 ### Known issues
-We were able to correct issues fpr the first assignment such as fixing the normal maps of the objects of the scene and implementing metallic, roughness and occlusion textures. Also shadow mapping issues that we had before have been solved
-Said this, we have created the shader to compute point lights and spot lights in the DEFERRED rendering mode using geometry instead of quads, but we haven't been able to correclty implement them in our scene.
-Also for the PBR rendering, while the look of a wet and reflective floor is very nice, it should be rough enough such that there aren't as many clear reflections as a more metallic texture like the one for the car.
-
-
-
+We have addressed several issues for the scond assignment, such as correctly implementing point lights and spotlights in the DEFERRED and adding the PBR rendering mode
+However, we haven't been able to successfully implement the motion blur (commented) nor the depth of field effect.
+Also when saving the scene.json file after positioning certain elements, such as the decals, when reloading they rotate.
