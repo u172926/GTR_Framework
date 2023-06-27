@@ -503,41 +503,22 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		quad->render(GL_TRIANGLES);
 	}
 	if (show_ssao) ssao_fbo->color_textures[0]->toViewport();	
-	
-	if (show_volumetric)
-		{			
-			glEnable(GL_BLEND);
-			glDisable(GL_DEPTH_TEST);
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			volumetric_fbo->color_textures[0]->toViewport();
-			glDisable(GL_BLEND);
-		}
 
 	if (show_postFX) renderPostFX(illumination_fbo->color_textures[0], gbuffer_fbo->depth_texture, camera);
-	
-	if (show_tonemapper)
-	{
-		shader = GFX::Shader::Get("tonemapper");
 
-		shader->enable();
-		shader->setUniform("u_scale", tonemapper_scale);
-		shader->setUniform("u_average_lum", average_lum);
-		shader->setUniform("u_lumwhite2", lum_white2);
-		shader->setUniform("u_igamma", 1.0f / gamma);
-		shader->setUniform("u_brightness", brightness);
-		shader->setUniform("u_saturation", saturation);
-		shader->setUniform("u_contrast", contrast);
-		shader->setUniform("u_vignett", vignett);	
-		shader->setUniform("u_noise_grain", noise_grain);
-		shader->setUniform("u_barrel_distortion", barrel_distortion);
-		shader->setUniform("u_pincushion_distortion", pincushion_distortion);
-		shader->setUniform("u_chromatic_aberration", chromatic_aberration);	
-		shader->setUniform("u_warmness", warmness);
-		shader->setUniform("u_sepia", sepia);
-		shader->setUniform("u_noir", noir);
+	if (show_tonemapper) tonemapperFX(illumination_fbo->color_textures[0]);
 
-		illumination_fbo->color_textures[0]->toViewport(shader);
+	if (show_volumetric)
+	{			
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		volumetric_fbo->color_textures[0]->toViewport();
+		
+		//to apply effects on voluemtric
+		if (show_tonemapper) tonemapperFX(illumination_fbo->color_textures[0]);
 	}
+
+
 }
 
 void SCN::Renderer::renderForward(SCN::Scene* scene, Camera* camera, eRenderMode mode)
@@ -1335,6 +1316,30 @@ void SCN::Renderer::renderPlanarReflection(SCN::Scene* scene, Camera* camera)
 	plane.render(GL_TRIANGLES);
 }
 
+
+void  SCN::Renderer::tonemapperFX(GFX::Texture* ill_texture)
+{
+	GFX::Shader* shader = GFX::Shader::Get("tonemapper");
+
+	shader->enable();
+	shader->setUniform("u_scale", tonemapper_scale);
+	shader->setUniform("u_average_lum", average_lum);
+	shader->setUniform("u_lumwhite2", lum_white2);
+	shader->setUniform("u_igamma", 1.0f / gamma);
+	shader->setUniform("u_brightness", brightness);
+	shader->setUniform("u_saturation", saturation);
+	shader->setUniform("u_contrast", contrast);
+	shader->setUniform("u_vignett", vignett);
+	shader->setUniform("u_noise_grain", noise_grain);
+	shader->setUniform("u_barrel_distortion", barrel_distortion);
+	shader->setUniform("u_pincushion_distortion", pincushion_distortion);
+	shader->setUniform("u_chromatic_aberration", chromatic_aberration);
+	shader->setUniform("u_warmness", warmness);
+	shader->setUniform("u_sepia", sepia);
+	shader->setUniform("u_noir", noir);
+
+	ill_texture->toViewport(shader);
+}
 
 void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera)
 {

@@ -180,6 +180,7 @@ namespace SCN {
 		void renderPlanarReflection(SCN::Scene* scene, Camera* camera);
 
 		void renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera);
+		void tonemapperFX(GFX::Texture* ill_texture);
 
 		//render the skybox
 		void renderSkybox(GFX::Texture* cubemap, float intensity);
