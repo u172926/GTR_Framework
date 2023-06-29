@@ -24,6 +24,7 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 	render_mode = eRenderMode::DEFERRED; //default
 	shader_mode = eShaderMode::PBR;
 
+	//options to toggle in UI
 	scene = nullptr;
 	skybox_cubemap = nullptr;
 	show_shadowmaps = false;
@@ -39,6 +40,7 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 	show_volumetric = false;
 	show_postFX = false;
 	flip = false;
+	show_motionblur = false;
 
 	ssao_points = generateSpherePoints(64, 1, false);
 	ssao_radius = 5.0;
@@ -47,6 +49,7 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 
 	air_density = 0.01;
 
+	//initialize fbos
 	gbuffer_fbo = nullptr;
 	illumination_fbo = nullptr;
 	ssao_fbo = nullptr;
@@ -61,6 +64,7 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 
 	probes_texture = nullptr;
 
+	//default values
 	tonemapper_scale = 1.0;
 	average_lum = 1.0;
 	lum_white2 = 1.0;
@@ -79,11 +83,13 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 	noir = 0.0;
 
 	instensity = 0.0;
+	prev_viewprojection_matrix;
 
 	if (!GFX::Shader::LoadAtlas(shader_atlas_filename))	exit(1);
 
 	GFX::checkGLErrors();
 
+	//initializes meshes for lights, probes, reflections
 	sphere.createSphere(1.0f);
 	sphere.uploadToVRAM();
 	quad = GFX::Mesh::getQuad();
@@ -161,13 +167,15 @@ void SCN::Renderer::renderFrame(SCN::Scene* scene, Camera* camera)
 	static Camera simmetric_camera = *camera;
 	vec2 size = CORE::getWindowSize();
 
-	//render actual scene
+	//render scene in defererd mode
 	if (render_mode == eRenderMode::DEFERRED)
 	{
 		renderDeferred(scene, camera);
 	}
+	//render scene in other modes
 	else
 	{
+		//create plane reflections fbo
 		if(!plane_ref_fbo)
 		{
 			plane_ref_fbo = new::GFX::FBO();
@@ -185,6 +193,7 @@ void SCN::Renderer::renderFrame(SCN::Scene* scene, Camera* camera)
 			renderForward(scene, &simmetric_camera, render_mode);
 		plane_ref_fbo->unbind();
 
+		//render scene in lights or texture mode
 		renderForward(scene, camera, render_mode);
 
 		if (show_planar_ref) renderPlanarReflection(scene, camera);
@@ -228,7 +237,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		plane_ref_fbo->create(size.x / 2, size.y / 2, 1, GL_RGB, GL_FLOAT);
 	}
 
-	//render inside the fbo all that is in the bind 
+	//render inside the fbos all that we put between the bind and unbind
 	gbuffer_fbo->bind();
 	{
 		//gbuffer_fbo->enableBuffers(true, false, false, false);
@@ -241,6 +250,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 	}
 	gbuffer_fbo->unbind();
 
+	//render decals
 	if(decals.size())
 	{		
 		gbuffer_fbo->depth_texture->copyTo(clone_depth_buffer);
@@ -284,6 +294,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 	plane_ref_fbo->bind();
 	{
+		//create simmetric camera for reflection
 		vec3 pos = camera->eye;
 		vec3 center = camera->center;
 		vec3 up = camera->up;
@@ -311,6 +322,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 
 		if (skybox_cubemap) renderSkybox(skybox_cubemap, scene->skybox_intensity);
 
+		//first render scne textures and ambient light only
 		shader = GFX::Shader::Get("deferred_global");
 
 		shader->enable();
@@ -329,7 +341,8 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		case eShaderMode::MULTIPASS: shader = GFX::Shader::Get("deferred_light"); break;
 		case eShaderMode::PBR: shader = GFX::Shader::Get("deferred_pbr"); break;
 		}
-
+		
+		//render lights with quad
 		shader->enable();
 
 		shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
@@ -356,13 +369,15 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		glDisable(GL_BLEND);
 		glEnable(GL_DEPTH_TEST);
 
-		//OTHER LIGHTS
+		//OTHER LIGHTS (POINT & SPOT)
+		//chose a shader
 		switch (shader_mode)
 		{
 		case eShaderMode::MULTIPASS: shader = GFX::Shader::Get("deferred_geometry"); glDisable(GL_DEPTH_TEST); break;
 		case eShaderMode::PBR: shader = GFX::Shader::Get("deferred_geometry_pbr"); glEnable(GL_DEPTH_TEST); break;
 		}
-		
+
+		//render lights with sphere (basic.vs)	
 		shader->enable();
 		shader->setTexture("u_albedo_texture", gbuffer_fbo->color_textures[0], 0);
 		shader->setTexture("u_normal_texture", gbuffer_fbo->color_textures[1], 1);
@@ -448,7 +463,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
 		shader->setUniform("u_iRes", vec2(1.0 / volumetric_fbo->color_textures[0]->width, 1.0 / volumetric_fbo->color_textures[0]->height));
 		shader->setUniform("u_camera_position", camera->eye);
-		shader->setUniform("u_air_density", air_density); //place air_density in scene (scene->air_density)
+		shader->setUniform("u_air_density", air_density); 
 		shader->setUniform("u_ambient_light", scene->ambient_light);
 		shader->setUniform("u_time", getTime() * 0.001f);
 		shader->setUniform("u_rand", random());
@@ -469,6 +484,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 	if (show_gbuffers)
 	{
 		show_tonemapper = false;
+		show_postFX = false;
 
 		glDisable(GL_DEPTH_TEST);
 		glDisable(GL_BLEND);
@@ -490,21 +506,35 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		gbuffer_fbo->depth_texture->toViewport(shader);
 		glViewport(0, 0, size.x, size.y);
 	}
+	//render illumination
 	else illumination_fbo->color_textures[0]->toViewport();
 
 	if (show_global_position)
 	{	
 		show_tonemapper = false;
+		show_postFX = false;
+
 		shader = GFX::Shader::Get("deferred_world_color");
 		shader->enable();
 		shader->setTexture("u_depth_texture", gbuffer_fbo->depth_texture, 3);
 		shader->setUniform("u_iRes", vec2(1.0 / size.x, 1.0 / size.y));
 		shader->setUniform("u_ivp", camera->inverse_viewprojection_matrix);
 		quad->render(GL_TRIANGLES);
-	}
-	if (show_ssao) ssao_fbo->color_textures[0]->toViewport();	
 
-	if (show_postFX) renderPostFX(illumination_fbo->color_textures[0], gbuffer_fbo->depth_texture, camera);
+	}
+	if (show_ssao)
+	{
+		show_tonemapper = false;
+		show_postFX = false;
+
+		ssao_fbo->color_textures[0]->toViewport();
+	}
+
+	if (show_postFX)
+	{
+		renderPostFX(illumination_fbo->color_textures[0], gbuffer_fbo->depth_texture, camera);
+		color_postFX(illumination_fbo->color_textures[0]);
+	}
 
 	if (show_tonemapper) tonemapperFX(illumination_fbo->color_textures[0]);
 
@@ -516,9 +546,8 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		
 		//to apply effects on voluemtric
 		if (show_tonemapper) tonemapperFX(illumination_fbo->color_textures[0]);
+		if (show_postFX) color_postFX(illumination_fbo->color_textures[0]);
 	}
-
-
 }
 
 void SCN::Renderer::renderForward(SCN::Scene* scene, Camera* camera, eRenderMode mode)
@@ -610,13 +639,13 @@ void SCN::Renderer::orderRender(SCN::Node* node, Camera* camera)
 
 void SCN::Renderer::renderObjects(Camera* camera, eRenderMode mode)
 {
-	//render entities (first opaques)
+	//render entities w/out alpha
 	for (int i = 0; i < render_calls.size(); ++i)
 	{	
 		RenderCall rc = render_calls[i];
 		renderNode(rc.model, rc.mesh, rc.material, camera, mode);
 	}
-	//render entities
+	//render entities w/ alpha
 	for (int i = 0; i < render_calls_alpha.size(); ++i)
 	{
 		RenderCall rc = render_calls_alpha[i];
@@ -909,6 +938,7 @@ void SCN::Renderer::renderMeshWithMaterialGBuffers(Matrix44 model, GFX::Mesh* me
 	Camera* camera = Camera::current;
 	GFX::Texture* white = GFX::Texture::getWhiteTexture();
 
+	//get textures
 	GFX::Texture* albedo_texture = material->textures[SCN::eTextureChannel::ALBEDO].texture;
 	GFX::Texture* emissive_texture = material->textures[SCN::eTextureChannel::EMISSIVE].texture;
 	GFX::Texture* normal_texture = material->textures[SCN::eTextureChannel::NORMALMAP].texture;
@@ -1060,6 +1090,7 @@ void::SCN::Renderer::captureIrradiance()
 
 void SCN::Renderer::loadIrradianceCache()
 {
+	//to render probes faster
 	FILE* f = fopen("irradiance_cache.bin", "rb");
 
 	if (f == NULL) return;
@@ -1291,8 +1322,6 @@ void SCN::Renderer::rendereReflectionProbe(sReflectionProbe& ref_probe)
 }
 
 
-
-
 void SCN::Renderer::renderPlanarReflection(SCN::Scene* scene, Camera* camera)
 {
 	vec2 size = CORE::getWindowSize();
@@ -1319,6 +1348,7 @@ void SCN::Renderer::renderPlanarReflection(SCN::Scene* scene, Camera* camera)
 
 void  SCN::Renderer::tonemapperFX(GFX::Texture* ill_texture)
 {
+	//tonemapper uniforms
 	GFX::Shader* shader = GFX::Shader::Get("tonemapper");
 
 	shader->enable();
@@ -1329,6 +1359,16 @@ void  SCN::Renderer::tonemapperFX(GFX::Texture* ill_texture)
 	shader->setUniform("u_brightness", brightness);
 	shader->setUniform("u_saturation", saturation);
 	shader->setUniform("u_contrast", contrast);
+
+	ill_texture->toViewport(shader);
+}
+
+void  SCN::Renderer::color_postFX(GFX::Texture* ill_texture)
+{
+	//postFX uniforms
+	GFX::Shader* shader = GFX::Shader::Get("color_postFX");
+
+	shader->enable();
 	shader->setUniform("u_vignett", vignett);
 	shader->setUniform("u_noise_grain", noise_grain);
 	shader->setUniform("u_barrel_distortion", barrel_distortion);
@@ -1352,8 +1392,7 @@ void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* dept
 	glDisable(GL_BLEND);
 	glDisable(GL_DEPTH_TEST);
 
-	Matrix44 prev_viewprojection_matrix;
-
+	//create fbos for pingpong (A, B) and temporal fbo
 	if (!postFX_fbo_A)
 	{
 		postFX_fbo_A = new GFX::FBO();
@@ -1368,20 +1407,23 @@ void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* dept
 		color_buffer->toViewport();
 	postFX_fbo_A->unbind();
 
-	//MOTION BLUR	
-	//shader = GFX::Shader::Get("motion_blur");
-	//shader->enable();
-	//shader->setUniform("u_iRes", vec2(1.0 / width, 1.0 / height));
-	//shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
-	//shader->setMatrix44("u_prev_vp", prev_viewprojection_matrix);
-	//shader->setTexture("u_depth_texture", depth_buffer, 4);
-	//postFX_fbo_B->bind();
-	//	postFX_fbo_A->color_textures[0]->toViewport(shader);
-	//postFX_fbo_B->unbind();
-	//
-	//std::swap(postFX_fbo_A, postFX_fbo_B);
-	//
-	//prev_viewprojection_matrix = camera->viewprojection_matrix;
+	//MOTION BLUR
+	if (show_motionblur)
+	{
+		shader = GFX::Shader::Get("motion_blur");
+		shader->enable();
+		shader->setUniform("u_iRes", vec2(1.0 / width, 1.0 / height));
+		shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
+		shader->setMatrix44("u_prev_vp", prev_viewprojection_matrix);
+		shader->setTexture("u_depth_texture", depth_buffer, 4);
+		postFX_fbo_B->bind();
+		postFX_fbo_A->color_textures[0]->toViewport(shader);
+		postFX_fbo_B->unbind();
+
+		prev_viewprojection_matrix = camera->viewprojection_matrix;
+
+		std::swap(postFX_fbo_A, postFX_fbo_B);
+	}
 	
 	//save image
 	postFX_fbo_temp->bind();
@@ -1416,6 +1458,7 @@ void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* dept
 		power = power << 1;
 	}
 
+	//bind fbo with bloom to temporal with original image
 	postFX_fbo_A->bind();
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE);
@@ -1491,7 +1534,7 @@ void SCN::Renderer::showUI()
 		ImGui::Checkbox("Show ShadowMaps", &show_shadowmaps);
 
 	}
-	else if (render_mode == eRenderMode::DEFERRED) //and choose deferred shader
+	else if (render_mode == eRenderMode::DEFERRED) 
 	{
 		static int shader = shader_mode;
 		ImGui::Combo("Shader", &shader, "MULTIPASS\0PBR", 2);
@@ -1515,6 +1558,15 @@ void SCN::Renderer::showUI()
 			ImGui::SliderFloat("brightness", &brightness, 0, 2);
 			ImGui::SliderFloat("saturation", &saturation, 0, 2);
 			ImGui::SliderFloat("contrast", &contrast, 0, 2);
+
+		}
+
+		ImGui::Checkbox("Enable Post FX", &show_postFX);
+		if (show_postFX)
+		{
+			ImGui::Checkbox("Enable Motion Blur", &show_motionblur);
+			ImGui::SliderFloat("bloom", &instensity, 0, 2);
+
 			ImGui::SliderFloat("vignett", &vignett, 0, 2);
 			ImGui::SliderFloat("noise_grain", &noise_grain, 0, 2);
 			ImGui::SliderFloat("hot and cold", &warmness, 0, 2);
@@ -1525,12 +1577,6 @@ void SCN::Renderer::showUI()
 			ImGui::SliderFloat("barrel distortion", &barrel_distortion, 0, 2);
 			ImGui::SliderFloat("pincushion distortion", &pincushion_distortion, 0, 2);
 
-		}
-
-		ImGui::Checkbox("Enable Post FX", &show_postFX);
-		if (show_postFX)
-		{
-			ImGui::SliderFloat("bloom", &instensity, 0, 2);
 		}
 
 	}	

@@ -81,6 +81,7 @@ namespace SCN {
 		bool show_volumetric;
 		bool show_postFX;
 		bool flip;
+		bool show_motionblur;
 
 		eRenderMode render_mode;
 		eShaderMode shader_mode;
@@ -143,6 +144,7 @@ namespace SCN {
 		GFX::FBO* postFX_fbo_B;
 		GFX::FBO* postFX_fbo_temp;
 
+		Matrix44 prev_viewprojection_matrix;
 
 		GFX::Texture* clone_depth_buffer;
 
@@ -181,7 +183,7 @@ namespace SCN {
 
 		void renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera);
 		void tonemapperFX(GFX::Texture* ill_texture);
-
+		void color_postFX(GFX::Texture* ill_texture);
 		//render the skybox
 		void renderSkybox(GFX::Texture* cubemap, float intensity);
 

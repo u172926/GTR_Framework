@@ -28,6 +28,7 @@ mirror basic.vs mirror.fs
 //POST FX SHADERS
 blur quad.vs blur.fs
 motion_blur quad.vs motion_blur.fs
+color_postFX quad.vs color_postFX.fs
 tonemapper quad.vs tonemapper.fs
 
 
@@ -245,6 +246,52 @@ uniform float u_igamma; //inverse gamma
 uniform float u_brightness;
 uniform float u_contrast;
 uniform float u_saturation;
+uniform float u_barrel_distortion;
+uniform float u_pincushion_distortion;
+uniform float u_distortion;
+uniform bool u_chromatic_aberration;
+
+#include "color_filters"
+
+out vec4 FragColor;
+
+void main() 
+{
+	vec4 color = texture2D( u_albedo_texture, v_uv);
+
+	float lum = dot(color.xyz, vec3(0.2126, 0.7152, 0.0722));
+	float L = (u_scale / u_average_lum) * lum;
+	float Ld = (L * (1.0 + L / u_lumwhite2)) / (1.0 + L);
+
+	color.xyz = (color.xyz / lum) * Ld;
+	color.xyz = max(color.xyz,vec3(0.001));
+	color.xyz = pow( color.xyz, vec3( u_igamma ) );
+
+	color.xyz *= u_brightness;
+	color.xyz = saturation(color.xyz, u_saturation);
+
+	vec3 midtone = vec3(0.5);
+	color.xyz = midtone + (color.xyz - midtone) * vec3(u_contrast);
+
+	FragColor = color;
+}
+
+
+
+
+
+
+
+
+
+\color_postFX.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_albedo_texture;
+
 uniform float u_vignett;
 uniform float u_noise_grain;
 uniform float u_barrel_distortion;
@@ -315,20 +362,6 @@ void main()
     float noiseValue = random(v_uv + vec2(noise_offset)) * u_noise_grain * 0.5;
     color.xyz += noiseValue;
 
-	float lum = dot(color.xyz, vec3(0.2126, 0.7152, 0.0722));
-	float L = (u_scale / u_average_lum) * lum;
-	float Ld = (L * (1.0 + L / u_lumwhite2)) / (1.0 + L);
-
-	color.xyz = (color.xyz / lum) * Ld;
-	color.xyz = max(color.xyz,vec3(0.001));
-	color.xyz = pow( color.xyz, vec3( u_igamma ) );
-
-	color.xyz *= u_brightness;
-	color.xyz = saturation(color.xyz, u_saturation);
-
-	vec3 midtone = vec3(0.5);
-	color.xyz = midtone + (color.xyz - midtone) * vec3(u_contrast);
-
 	color.xyz *= 1.2 - length(v_uv - vec2(0.5)) * u_vignett;
 
 	if (u_warmness != 1.0) color.xyz = hotAndColdEffect(color.xyz, u_warmness);
@@ -341,6 +374,7 @@ void main()
 
 	FragColor = color;
 }
+
 
 
 
@@ -1324,6 +1358,10 @@ float rand(vec2 co)
 {
     return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453123);
 }
+float rand3(vec3 co)
+{
+    return fract(sin(dot(co, vec3(12.9898, 78.233, 45.543))) * 43758.5453123);
+}
 
 void main()
 {
@@ -1351,12 +1389,13 @@ void main()
 
 	vec3 volumetric = vec3(0.0);
 	float transparency = 1.0;
+
 	float air_step =  u_air_density * step_dist / 10;
-
-
 
 	for (int i = 0; i < SAMPLES; i++)
 	{
+		//float air_step =  u_air_density * step_dist * rand3(current_pos) / 10; 
+
 		vec3 v = vec3(1.0);
 		vec3 light = vec3(0.0);
 		float shadow_factor = 1.0;
