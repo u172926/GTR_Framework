@@ -21,8 +21,8 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 {
 	render_wireframe = false;
 	render_boundaries = false;
-	render_mode = eRenderMode::DEFERRED; //default
-	shader_mode = eShaderMode::PBR;
+	render_mode = eRenderMode::TEXTURED; //default
+	shader_mode = eShaderMode::MULTIPASS;
 
 	//options to toggle in UI
 	scene = nullptr;
@@ -61,6 +61,7 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 	postFX_fbo_A = nullptr;
 	postFX_fbo_B = nullptr;
 	postFX_fbo_temp = nullptr;
+	depth_of_field_fbo = nullptr;
 
 	probes_texture = nullptr;
 
@@ -83,6 +84,7 @@ SCN::Renderer::Renderer(const char* shader_atlas_filename)
 	noir = 0.0;
 
 	instensity = 0.0;
+	dof_instensity = 0.0;
 	prev_viewprojection_matrix;
 
 	if (!GFX::Shader::LoadAtlas(shader_atlas_filename))	exit(1);
@@ -530,12 +532,7 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		ssao_fbo->color_textures[0]->toViewport();
 	}
 
-	if (show_postFX)
-	{
-		renderPostFX(illumination_fbo->color_textures[0], gbuffer_fbo->depth_texture, camera);
-		color_postFX(illumination_fbo->color_textures[0]);
-	}
-
+	if (show_postFX) renderPostFX(illumination_fbo->color_textures[0], gbuffer_fbo->depth_texture, camera);
 	if (show_tonemapper) tonemapperFX(illumination_fbo->color_textures[0]);
 
 	if (show_volumetric)
@@ -543,12 +540,13 @@ void SCN::Renderer::renderDeferred(SCN::Scene* scene, Camera* camera)
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		volumetric_fbo->color_textures[0]->toViewport();
-		
-		//to apply effects on voluemtric
+
+		//apply FXs on volumetric fbo
+		if (show_postFX) renderPostFX(illumination_fbo->color_textures[0], gbuffer_fbo->depth_texture, camera);
 		if (show_tonemapper) tonemapperFX(illumination_fbo->color_textures[0]);
-		if (show_postFX) color_postFX(illumination_fbo->color_textures[0]);
 	}
-}
+}	
+	
 
 void SCN::Renderer::renderForward(SCN::Scene* scene, Camera* camera, eRenderMode mode)
 {
@@ -1360,15 +1358,6 @@ void  SCN::Renderer::tonemapperFX(GFX::Texture* ill_texture)
 	shader->setUniform("u_saturation", saturation);
 	shader->setUniform("u_contrast", contrast);
 
-	ill_texture->toViewport(shader);
-}
-
-void  SCN::Renderer::color_postFX(GFX::Texture* ill_texture)
-{
-	//postFX uniforms
-	GFX::Shader* shader = GFX::Shader::Get("color_postFX");
-
-	shader->enable();
 	shader->setUniform("u_vignett", vignett);
 	shader->setUniform("u_noise_grain", noise_grain);
 	shader->setUniform("u_barrel_distortion", barrel_distortion);
@@ -1379,7 +1368,9 @@ void  SCN::Renderer::color_postFX(GFX::Texture* ill_texture)
 	shader->setUniform("u_noir", noir);
 
 	ill_texture->toViewport(shader);
+
 }
+
 
 void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera)
 {
@@ -1392,7 +1383,7 @@ void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* dept
 	glDisable(GL_BLEND);
 	glDisable(GL_DEPTH_TEST);
 
-	//create fbos for pingpong (A, B) and temporal fbo
+	//create fbos for pingpong (A, B), temporal fbo and DoF
 	if (!postFX_fbo_A)
 	{
 		postFX_fbo_A = new GFX::FBO();
@@ -1402,10 +1393,19 @@ void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* dept
 		postFX_fbo_B->create(width, height, 1, GL_RGB, GL_HALF_FLOAT);
 		postFX_fbo_temp->create(width, height, 1, GL_RGB, GL_HALF_FLOAT);
 	}
+	if (!depth_of_field_fbo)
+	{
+		depth_of_field_fbo = new GFX::FBO();
+		depth_of_field_fbo->create(width, height, 1, GL_RGB, GL_HALF_FLOAT, false);
+	}
 
 	postFX_fbo_A->bind();
 		color_buffer->toViewport();
 	postFX_fbo_A->unbind();
+
+	depth_of_field_fbo->bind();
+		postFX_fbo_A->color_textures[0]->toViewport();
+	depth_of_field_fbo->unbind();
 
 	//MOTION BLUR
 	if (show_motionblur)
@@ -1416,48 +1416,53 @@ void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* dept
 		shader->setMatrix44("u_ivp", camera->inverse_viewprojection_matrix);
 		shader->setMatrix44("u_prev_vp", prev_viewprojection_matrix);
 		shader->setTexture("u_depth_texture", depth_buffer, 4);
+
 		postFX_fbo_B->bind();
-		postFX_fbo_A->color_textures[0]->toViewport(shader);
+			postFX_fbo_A->color_textures[0]->toViewport(shader);
 		postFX_fbo_B->unbind();
 
 		prev_viewprojection_matrix = camera->viewprojection_matrix;
 
 		std::swap(postFX_fbo_A, postFX_fbo_B);
 	}
-	
+
+	//DEPTH OF FIELD
+	//shader = GFX::Shader::Get("blur");
+	//shader->enable();
+	//
+	//blurPingpong(shader, depth_of_field_fbo);
+	//
+	//shader = GFX::Shader::Get("depth_of_field");
+	//shader->enable();
+	//shader->setUniform("u_outFocus_texture", depth_of_field_fbo->color_textures[0], 1);
+	//shader->setUniform("u_depth_texture", depth_buffer, 2);
+	//shader->setUniform("u_focal_distance", 1.0f);
+	//shader->setUniform("u_min_distance", 1.0f);
+	//shader->setUniform("u_max_distance", dof_instensity);
+	//shader->setUniform("u_camera_nearfar", vec2(camera->near_plane, camera->far_plane));
+	//
+	//postFX_fbo_B->bind();
+	//	postFX_fbo_A->color_textures[0]->toViewport(shader);
+	//postFX_fbo_B->unbind();
+	//
+	//std::swap(postFX_fbo_A, postFX_fbo_B);
+	//
+	//postFX_fbo_A->color_textures[0]->toViewport();
+
+
 	//save image
 	postFX_fbo_temp->bind();
 		postFX_fbo_A->color_textures[0]->toViewport(shader);
 	postFX_fbo_temp->unbind();
+	
 	
 	//BLOOM
 	shader = GFX::Shader::Get("blur");
 	shader->enable();
 	shader->setUniform("u_intensity", instensity);
 	
-	int power = 1;
-	for (int i = 0; i < 4; i++)
-	{		
-		shader->setUniform("u_offset", vec2(1.0f / width, 0.0) * (float)power);
-		shader->setUniform("u_texture", postFX_fbo_A->color_textures[0], 0);
-		postFX_fbo_B->bind();
-			quad->render(GL_TRIANGLES);
-		postFX_fbo_B->unbind();
+	blurPingpong(shader, postFX_fbo_A);
 	
-		std::swap(postFX_fbo_A, postFX_fbo_B);
-	
-		shader->setUniform("u_offset", vec2(0.0, 1.0f / height) * (float)power);
-		shader->setUniform("u_texture", postFX_fbo_A->color_textures[0], 0);
-	
-		postFX_fbo_B->bind();
-			quad->render(GL_TRIANGLES);
-		postFX_fbo_B->unbind();
-	
-		std::swap(postFX_fbo_A, postFX_fbo_B);
-	
-		power = power << 1;
-	}
-
 	//bind fbo with bloom to temporal with original image
 	postFX_fbo_A->bind();
 		glEnable(GL_BLEND);
@@ -1469,6 +1474,36 @@ void  SCN::Renderer::renderPostFX(GFX::Texture* color_buffer, GFX::Texture* dept
 	postFX_fbo_A->color_textures[0]->toViewport();
 
 }
+
+void SCN::Renderer::blurPingpong(GFX::Shader* shader, GFX::FBO* fbo_A)
+{
+	float width = fbo_A->color_textures[0]->width;
+	float height = fbo_A->color_textures[0]->height;
+
+	int power = 1;
+	for (int i = 0; i < 4; i++)
+	{
+		shader->setUniform("u_offset", vec2(1.0f / width, 0.0) * (float)power);
+		shader->setUniform("u_texture", fbo_A->color_textures[0], 0);
+		postFX_fbo_B->bind();
+			quad->render(GL_TRIANGLES);
+		postFX_fbo_B->unbind();
+
+		std::swap(fbo_A, postFX_fbo_B);
+
+		shader->setUniform("u_offset", vec2(0.0, 1.0f / height) * (float)power);
+		shader->setUniform("u_texture", fbo_A->color_textures[0], 0);
+
+		postFX_fbo_B->bind();
+			quad->render(GL_TRIANGLES);
+		postFX_fbo_B->unbind();
+
+		std::swap(fbo_A, postFX_fbo_B);
+
+		power = power << 1;
+	}
+}
+
 
 
 
@@ -1482,12 +1517,14 @@ void SCN::Renderer::showUI()
 
 	ImGui::SliderFloat("Skybox intensity", &scene->skybox_intensity, 0, 10);
 
+	ImGui::Spacing();
+
 	if (render_mode == eRenderMode::DEFERRED)
 	{
-		ImGui::Checkbox("Show volumetric", &show_volumetric);
+		ImGui::Checkbox("Render with volumetric", &show_volumetric);
 		if (show_volumetric) ImGui::DragFloat("Air density", &air_density, 0.0001, 0.0, 1);
 
-		ImGui::Checkbox("Show irradiance", &show_irradiance);
+		ImGui::Checkbox("Render with irradiance", &show_irradiance);
 		if (show_irradiance) ImGui::SliderFloat("Irradiance multiplier", &irr_mulitplier, 0, 10);
 
 	}
@@ -1506,7 +1543,7 @@ void SCN::Renderer::showUI()
 			loadIrradianceCache();
 			show_probes = true;
 		}
-
+		ImGui::Spacing();
 		ImGui::Checkbox("Show reflection probes", &show_ref_probes);
 		if (ImGui::Button("Update Reflections"))
 		{
@@ -1514,11 +1551,12 @@ void SCN::Renderer::showUI()
 			show_ref_probes = true;
 		}
 
-		ImGui::Checkbox("Show reflections", &show_planar_ref);
+		ImGui::Spacing();
 	}
 
+	ImGui::Checkbox("Enable reflections", &show_planar_ref);
+
 	ImGui::Combo("Render Mode", (int*)&render_mode, "TEXTURED\0LIGHTS\0DEFERRED", 3);
-	
 	if (render_mode == eRenderMode::TEXTURED)
 	{
 		ImGui::Combo("Shader", (int*)&shader_mode, "FLAT\0TEXTURE", 2);
@@ -1547,26 +1585,19 @@ void SCN::Renderer::showUI()
 		ImGui::Checkbox("Show GlobalPosition", &show_global_position);
 		ImGui::Checkbox("Show SSAO", &show_ssao);
 		ImGui::SliderFloat("SSAO radius", &ssao_radius, 0, 50);
+		ImGui::Spacing();
 
 		ImGui::Checkbox("Enable Tonemapper", &show_tonemapper);
 		if (show_tonemapper)
 		{
-			ImGui::SliderFloat("tonemapper_scale", &tonemapper_scale, 0, 2);
+			ImGui::SliderFloat("tonemapper_scale", &tonemapper_scale, 0, 2); 
 			ImGui::SliderFloat("average_lum", &average_lum, 0, 2);
 			ImGui::SliderFloat("lum_white2", &lum_white2, 0, 2);
 			ImGui::SliderFloat("gamma", &gamma, 0, 2);
 			ImGui::SliderFloat("brightness", &brightness, 0, 2);
 			ImGui::SliderFloat("saturation", &saturation, 0, 2);
 			ImGui::SliderFloat("contrast", &contrast, 0, 2);
-
-		}
-
-		ImGui::Checkbox("Enable Post FX", &show_postFX);
-		if (show_postFX)
-		{
-			ImGui::Checkbox("Enable Motion Blur", &show_motionblur);
-			ImGui::SliderFloat("bloom", &instensity, 0, 2);
-
+			ImGui::Spacing(); ImGui::Spacing();
 			ImGui::SliderFloat("vignett", &vignett, 0, 2);
 			ImGui::SliderFloat("noise_grain", &noise_grain, 0, 2);
 			ImGui::SliderFloat("hot and cold", &warmness, 0, 2);
@@ -1576,7 +1607,14 @@ void SCN::Renderer::showUI()
 			ImGui::Checkbox("Show chromatic aberrations", &chromatic_aberration);
 			ImGui::SliderFloat("barrel distortion", &barrel_distortion, 0, 2);
 			ImGui::SliderFloat("pincushion distortion", &pincushion_distortion, 0, 2);
+		}
 
+		ImGui::Checkbox("Enable Post FX", &show_postFX);
+		if (show_postFX)
+		{
+			ImGui::Checkbox("Enable Motion Blur", &show_motionblur);
+			ImGui::SliderFloat("bloom", &instensity, 0, 2);
+			ImGui::SliderFloat("dof", &dof_instensity, 0, 1);
 		}
 
 	}	

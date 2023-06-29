@@ -28,7 +28,7 @@ mirror basic.vs mirror.fs
 //POST FX SHADERS
 blur quad.vs blur.fs
 motion_blur quad.vs motion_blur.fs
-color_postFX quad.vs color_postFX.fs
+depth_of_field quad.vs depth_of_field.fs
 tonemapper quad.vs tonemapper.fs
 
 
@@ -251,53 +251,8 @@ uniform float u_pincushion_distortion;
 uniform float u_distortion;
 uniform bool u_chromatic_aberration;
 
-#include "color_filters"
-
-out vec4 FragColor;
-
-void main() 
-{
-	vec4 color = texture2D( u_albedo_texture, v_uv);
-
-	float lum = dot(color.xyz, vec3(0.2126, 0.7152, 0.0722));
-	float L = (u_scale / u_average_lum) * lum;
-	float Ld = (L * (1.0 + L / u_lumwhite2)) / (1.0 + L);
-
-	color.xyz = (color.xyz / lum) * Ld;
-	color.xyz = max(color.xyz,vec3(0.001));
-	color.xyz = pow( color.xyz, vec3( u_igamma ) );
-
-	color.xyz *= u_brightness;
-	color.xyz = saturation(color.xyz, u_saturation);
-
-	vec3 midtone = vec3(0.5);
-	color.xyz = midtone + (color.xyz - midtone) * vec3(u_contrast);
-
-	FragColor = color;
-}
-
-
-
-
-
-
-
-
-
-\color_postFX.fs
-
-#version 330 core
-
-in vec2 v_uv;
-
-uniform sampler2D u_albedo_texture;
-
 uniform float u_vignett;
 uniform float u_noise_grain;
-uniform float u_barrel_distortion;
-uniform float u_pincushion_distortion;
-uniform float u_distortion;
-uniform bool u_chromatic_aberration;
 
 #include "color_filters"
 uniform float u_warmness;
@@ -362,21 +317,74 @@ void main()
     float noiseValue = random(v_uv + vec2(noise_offset)) * u_noise_grain * 0.5;
     color.xyz += noiseValue;
 
+	float lum = dot(color.xyz, vec3(0.2126, 0.7152, 0.0722));
+	float L = (u_scale / u_average_lum) * lum;
+	float Ld = (L * (1.0 + L / u_lumwhite2)) / (1.0 + L);
+
+	color.xyz = (color.xyz / lum) * Ld;
+	color.xyz = max(color.xyz,vec3(0.001));
+	color.xyz = pow( color.xyz, vec3( u_igamma ) );
+
+	color.xyz *= u_brightness;
+	color.xyz = saturation(color.xyz, u_saturation);
+
+	vec3 midtone = vec3(0.5);
+	color.xyz = midtone + (color.xyz - midtone) * vec3(u_contrast);
+	
 	color.xyz *= 1.2 - length(v_uv - vec2(0.5)) * u_vignett;
 
 	if (u_warmness != 1.0) color.xyz = hotAndColdEffect(color.xyz, u_warmness);
 	color.xyz = vintageFilter(color.xyz, u_sepia);
 	color.xyz = noirEffect(color.xyz, u_noir);
 
-	//color.xyz = horrorFilter(color.xyz);
-	//color.xyz = dramaFilter(color.xyz);
-	//color.xyz = actionFilter(color.xyz);
-
 	FragColor = color;
 }
 
 
 
+
+
+
+
+\colorFX.fs
+
+
+
+
+
+
+\depth_of_field.fs
+
+#version 330 core
+
+in vec2 v_uv;
+
+uniform sampler2D u_texture;
+uniform sampler2D u_outFocus_texture;
+uniform sampler2D u_depth_texture;
+uniform float u_focal_distance;
+uniform float u_min_distance;
+uniform float u_max_distance;
+uniform vec2 u_camera_nearfar;
+
+out vec4 FragColor;
+
+void main() 
+{
+	
+	float depth = texture(u_depth_texture, v_uv).x;
+
+	float nf_x = u_camera_nearfar.x;
+	float nf_y = u_camera_nearfar.y;
+	depth = nf_x * (depth + 1.0) / (nf_y + nf_x - depth * (nf_y - nf_x));
+
+	vec4 color = texture(u_texture, v_uv);
+	vec4 out_focus = texture(u_outFocus_texture, v_uv);
+
+	float blur = smoothstep(u_min_distance, u_max_distance, abs(depth - u_focal_distance));
+
+	FragColor = mix(color, out_focus, blur);
+}
 
 
 

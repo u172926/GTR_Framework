@@ -104,6 +104,7 @@ namespace SCN {
 		float noir;
 
 		float instensity;
+		float dof_instensity;
 
 		GFX::Texture* skybox_cubemap;
 		GFX::Texture* probes_texture;
@@ -143,6 +144,7 @@ namespace SCN {
 		GFX::FBO* postFX_fbo_A;
 		GFX::FBO* postFX_fbo_B;
 		GFX::FBO* postFX_fbo_temp;
+		GFX::FBO* depth_of_field_fbo;
 
 		Matrix44 prev_viewprojection_matrix;
 
@@ -181,9 +183,12 @@ namespace SCN {
 		void rendereReflectionProbe(sReflectionProbe& probe);
 		void renderPlanarReflection(SCN::Scene* scene, Camera* camera);
 
-		void renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera);
 		void tonemapperFX(GFX::Texture* ill_texture);
-		void color_postFX(GFX::Texture* ill_texture);
+		void renderPostFX(GFX::Texture* color_buffer, GFX::Texture* depth_buffer, Camera* camera);
+		void blurPingpong(GFX::Shader* shader, GFX::FBO* fbo_A);
+
+	
+
 		//render the skybox
 		void renderSkybox(GFX::Texture* cubemap, float intensity);
 
